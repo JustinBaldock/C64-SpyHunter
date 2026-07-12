@@ -81,6 +81,20 @@
 ;     6. Water colours are the per-segment split colours (ROAD_BORDER/MC1/MC2):
 ;        border/bg $36=$0B, mc1 $37=$0F, mc2 $38=$01 (grey/white, moonlit water).
 ;
+;   RIVER ENTRANCE / TIMER EXPIRY (snapshot "river entrance, timer gone"):
+;     1. ROAD_FEATURE $44=$13 is the river-entrance transition feature (segment
+;        $0F, PREV_FEATURE=$11, SCENE_IDX=$13).  Still the car scene (SCENE_ID=
+;        $05), drawn as $7800 map tiles: the road divides into a two-lane
+;        highway with a central median (tile $2F) + roadside scenery, narrowing
+;        toward the water. (No water tiles on screen yet - this is the approach.)
+;     2. "Timer gone" mechanism: when GAME_TIME reaches 0, WAIT_FRAME_TIMER sets
+;        EXTRA_LIFE_AVAIL ($4D12) = $FF; DRAW_STATUS_PANEL then draws the LIVES
+;        markers in the timer slot INSTEAD of the countdown, so the timer
+;        disappears.  So $4D12 is really a timer-expired flag: $00 = running/
+;        shown, $FF = expired/hidden (and it also sets FLAG_FC on the car scene).
+;     3. TIMER_ENABLE $E3 stays $02 after expiry, so GAME_TIME keeps wrapping
+;        past 0 (seen $9761) but is no longer drawn.
+;
 ; RUNTIME MEMORY MAP
 ;   $00-$01 6510 I/O port ($01=$05 run) ; $02-$04 high score BCD
 ;   $12-$2F working pointers            ; $34-$41 IRQ/raster split state
@@ -265,7 +279,8 @@ IRQ_HALF = $4D0D    ; IRQ top/bottom toggle
 FRAME_SUBCTR = $4D0F    ; frame sub-counter
 STATE_4D10 = $4D10
 NUM_PLAYERS = $4D11    ; 1 or 2 players
-EXTRA_LIFE_AVAIL = $4D12    ; extra life pending
+EXTRA_LIFE_AVAIL = $4D12    ; timer-expired flag: $00 running(timer shown),
+                            ;   $FF expired (DRAW_STATUS_PANEL shows lives, hides timer)
 GAME_STATE = $4D13    ; game state machine
 TWO_PLAYER = $4D14    ; 2-player flag
 LIVES = $4D15    ; player lives
@@ -3165,6 +3180,8 @@ RESET_SCROLL_VARS:
 
 ; -----------------------------------------------------------------------
 ; Wait for the IRQ frame flag; every 4th frame decrement the BCD game timer.
+; When GAME_TIME reaches 0 it sets EXTRA_LIFE_AVAIL=$FF (the timer-expired flag
+; that hides the panel timer) and, on the car scene (SCENE_ID=$05), inc FLAG_FC.
 WAIT_FRAME_TIMER:
     lda FRAME_FLAG
     cmp #$02
@@ -3896,7 +3913,9 @@ LA955:
     .byte $80,$82,$84,$86
 
 ; -----------------------------------------------------------------------
-; Draw the panel indicators: weapon/fuel icons and the extra-life marker.
+; Draw the panel indicators: weapon/fuel icons, then EITHER the game timer
+; (LA955, when EXTRA_LIFE_AVAIL=$00) OR the lives markers (when EXTRA_LIFE_AVAIL
+; =$FF, i.e. the timer has expired) - which is why the timer vanishes at 0.
 DRAW_STATUS_PANEL:
     ldx #$1C
     stx PANEL_X

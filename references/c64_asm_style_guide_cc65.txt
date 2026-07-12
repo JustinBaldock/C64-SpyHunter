@@ -1,0 +1,556 @@
+; =============================================================================
+; C64 REVERSE-ENGINEERING ASSEMBLY STYLE GUIDE
+; =============================================================================
+; Derived from the conventions used in the c64-commando-2084 reverse-
+; engineering project (ricardoquesada), cross-referenced against the
+; Uridium and Elite C64 RE projects for consistency.
+;
+; Adapted for the cc65 toolchain (ca65 assembler + ld65 linker).
+;
+; This guide covers naming, layout, commenting, file organisation, and
+; build conventions for C64 RE projects that aim for a byte-exact
+; reassembly of the original binary.
+; =============================================================================
+
+
+; =============================================================================
+; 1. ASSEMBLER / TOOLCHAIN CHOICE
+; =============================================================================
+;
+; Use cc65 (https://cc65.github.io/).
+;   - Free, cross-platform, actively maintained.
+;   - Includes ca65 (macro assembler) and ld65 (linker).
+;   - ca65 supports the 6502, 65C02, and 65816 instruction sets,
+;     local scoping via .proc/.endproc, powerful macros, conditional
+;     assembly, and binary includes.
+;   - Two-step build: assemble with ca65, then link with ld65.
+;
+; Typical invocation:
+;   ca65 -t c64 -o bin/game.o src/main.asm
+;   ld65 -o bin/game.prg -C src/game.cfg bin/game.o
+;
+; Minimal linker config (game.cfg) for a flat RE project:
+;
+;   MEMORY {
+;       RAM: start = $0801, size = $F7FF, file = %O, fill = yes;
+;   }
+;   SEGMENTS {
+;       CODE: load = RAM, type = rw;
+;   }
+
+
+; =============================================================================
+; 2. KEY SYNTAX DIFFERENCES FROM 64tass
+; =============================================================================
+;
+; If you are coming from a 64tass-based project (like Commando or
+; Uridium), note these differences:
+;
+;   FEATURE           64tass                   ca65 (cc65)
+;   -------           ------                   -----------
+;   Labels            LABEL                    LABEL:  (colon required)
+;   Local labels      _L00 (underscore)        @L00 (@ prefix, "cheap
+;                                               local") or use .proc
+;   Directives        .byte .word .text        .byte .word .asciiz
+;                     .null .binary .fill      .incbin .res
+;   Macros (define)   NAME .MACRO ... .ENDM    .macro NAME ... .endmacro
+;   Macros (call)     #NAME                    NAME (no # prefix)
+;   Conditionals      .IF ... .ELSE ... .ENDIF .if ... .else ... .endif
+;   Origin address    *= $0801                 .org $0801
+;   Current PC        *                        * (same)
+;   String format     format("%d", BOOT)       .sprintf("%d", BOOT)
+;   Procedure scope   (implicit via _ prefix)  .proc NAME ... .endproc
+;   Binary include    .binary "file.bin"       .incbin "file.bin"
+;   Fill bytes        .fill N, $00             .res N, $00
+;   Build             one step (64tass)        two steps (ca65 + ld65)
+
+
+; =============================================================================
+; 3. FILE ORGANISATION
+; =============================================================================
+;
+; main.asm           The master source file. Contains:
+;                      - project header / description
+;                      - build-time constants and feature flags
+;                      - all symbol definitions (ZP, pointers, fields,
+;                        absolute addresses) at the top, BEFORE code
+;                      - macros
+;                      - all code
+;                      - .include / .incbin directives for external data
+;
+; music.asm          Separate file for a self-contained music driver.
+;
+; *.bin              Raw binary data extracted from the original:
+;                    level maps, charsets, sprite data. Included via
+;                    .incbin directives at the correct origin address.
+;
+; game.cfg           Linker configuration file defining the memory
+;                    layout and segment mapping.
+;
+; Makefile           Builds the .prg via ca65 + ld65, optionally wraps
+;                    it in a .d64, and verifies the output with an MD5
+;                    or SHA256 checksum against the known-good original.
+;
+; Origin addresses are set explicitly with .org $XXXX before each
+; section or .incbin directive:
+;
+;         .org $5000
+; .include "music.asm"
+;
+;         .org $C000
+; .incbin "charset.bin"
+;
+;         .org $E400
+; .incbin "sprites.bin"
+
+
+; =============================================================================
+; 4. LABEL NAMING CONVENTIONS
+; =============================================================================
+;
+; ---------- Global labels ----------
+;
+; UPPER_SNAKE_CASE for routines (colon required in ca65):
+;   GAME_LOOP:
+;   SORT_SPRITES_BY_Y:
+;   HANDLE_JOY2:
+;   PRINT_CREDITS:
+;   NMI_HANDLER:
+;   CHECK_COLLISION:
+;   SETUP_HERO_ANIMATION:
+;
+; UPPER_SNAKE_CASE for named constants and feature flags (no colon,
+; these are symbol assignments):
+;   ENABLE_DEBUG = 0
+;   TOTAL_MAX_SPRITES = 16
+;   TOTAL_LIVES = $05
+;   INITIAL_LEVEL = 0
+;
+; UPPER_SNAKE_CASE for named RAM variables (absolute addresses):
+;   V_SCROLL_BIT_IDX = $0402
+;   GAME_TICK = $040A
+;   HERO_ANIM_MOV_IDX = $04E0
+;   IS_HERO_DEAD = $0503
+;   SCORE_LSB = $04F8
+;
+; ---------- Prefix conventions for not-yet-understood symbols ----------
+;
+; When a symbol's PURPOSE is not yet known, use a lowercase prefix
+; plus the hex address. This makes unknowns visually distinct from
+; confirmed names at a glance:
+;
+;   aXXXX    absolute address, purpose unknown
+;              a04E7 = $04E7
+;
+;   pXX      zero-page pointer (2-byte pair), purpose unknown
+;              p22 = $22
+;              p23 = $23
+;
+;   fXXXX    field / data table, purpose unknown
+;              fDB48 = $DB48
+;
+;   a01      zero-page byte, purpose unknown (same prefix as absolute)
+;              a14 = $14
+;
+; Prefix conventions for KNOWN zero-page variables:
+;   Z_       zero-page variable with a known purpose
+;              Z_TEMP1 = $10
+;              Z_PLAY_MUSIC_INSIDE_IRQ = $12
+;              Z_SPRITES_IDX_X = $50
+;
+; Once a symbol's purpose is understood, RENAME it from the placeholder
+; form (aXXXX / pXX) to a descriptive UPPER_SNAKE_CASE name. This is
+; the primary way progress gets recorded -- the ratio of descriptive
+; names to placeholder names IS the project's coverage metric.
+;
+; ---------- Local labels ----------
+;
+; ca65 offers two local-label mechanisms:
+;
+; OPTION A: Cheap locals with @ prefix (simplest, closest to 64tass
+; convention). Scoped between two non-cheap global labels:
+;
+;   GAME_LOOP:
+;           lda V_SCROLL_DELTA
+;           beq @L00
+;           jsr LEVEL_DRAW_VIEWPORT
+;           jmp GAME_LOOP
+;   @L00:
+;           jsr SORT_SPRITES_BY_Y
+;           ...
+;
+; OPTION B: .proc/.endproc blocks (stronger scoping, recommended for
+; larger routines). All labels inside are fully local:
+;
+;   .proc GAME_LOOP
+;           lda V_SCROLL_DELTA
+;           beq skip
+;           jsr LEVEL_DRAW_VIEWPORT
+;           jmp GAME_LOOP
+;   skip:
+;           jsr SORT_SPRITES_BY_Y
+;           ...
+;   .endproc
+;
+; Recommended: use .proc/.endproc for substantial routines (>10 lines)
+; and @-prefixed cheap locals for short branch targets within them.
+;
+; Naming within either style:
+;   @L00, @L01, @L02 ...    generic branch targets
+;   @skip                    "skip this block" branch
+;   @done                    "finished, fall through to RTS"
+;   @loop                    loop top
+;   @ret                     early return
+
+
+; =============================================================================
+; 5. SECTION DIVIDERS
+; =============================================================================
+;
+; Use a full-width divider line before every routine:
+;
+; ;=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=;
+; ; Brief description of what the routine does
+; .proc ROUTINE_NAME
+;         lda #$00
+;         ...
+;         rts
+; .endproc
+;
+; Use a comment-only header for major sections within the file:
+;
+; ;
+; ; **** ZP ABSOLUTE ADDRESSES ****
+; ;
+;
+; ;
+; ; **** MACROS ****
+; ;
+;
+; ;
+; ; **** CODE ****
+; ;
+;
+; The section order in the file should be:
+;   1. Project header / description
+;   2. Feature flags / build constants
+;   3. ZP absolute addresses
+;   4. ZP pointers
+;   5. Fields (data tables)
+;   6. Absolute addresses (non-ZP RAM variables)
+;   7. Pointers (non-ZP)
+;   8. Macros
+;   9. Code (starting with .org $0801 and the BASIC stub)
+;  10. Data includes (.include / .incbin at their origin addresses)
+
+
+; =============================================================================
+; 6. COMMENTING CONVENTIONS
+; =============================================================================
+;
+; ---------- Inline comments ----------
+;
+; Use semicolons aligned to a consistent column (column 33 or 41 is
+; common). Keep comments factual and terse:
+;
+;         lda $DC00    ; CIA1: Data Port Register A
+;         and #$1F     ; Keep direction + fire bits
+;         sta Z_TEMP1  ; Save joystick state
+;
+; ---------- Value annotations ----------
+;
+; When an immediate value has a known meaning, note it inline:
+;
+;         lda #$7F     ; Turn off CIA interrupts
+;         cmp #$03     ; Level 3?
+;         lda #$14     ; Points won after completing a level
+;
+; For bit masks, show the binary form:
+;
+;         and #$07     ; #%00000111
+;         ora #$80     ; #%10000000
+;
+; ---------- Routine headers ----------
+;
+; A one-line description directly above or on the label line is the
+; minimum. For complex routines, list inputs and side effects:
+;
+; ;=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=;
+; ; Print credits text to screen
+; ; Input:  $FB/$FC -> Screen RAM
+; ;         $FD/$FE -> Color RAM
+; ; Trashes: A, X, Y
+; .proc PRINT_CREDITS
+;         ...
+; .endproc
+;
+; ---------- Uncertainty markers ----------
+;
+; When you are not sure about something, say so explicitly:
+;
+;         sta a04E7             ; (???) purpose unclear
+;         lda a19               ; Stores current hero animation, but seems unused
+;
+; The (???) or "seems unused" markers are searchable and make the
+; project's uncertainty visible rather than hidden.
+;
+; ---------- Original address annotations ----------
+;
+; When the original binary address of a routine is known (e.g. from
+; a disassembly listing), note it on the label line:
+;
+; .proc GAME_LOOP              ; $08CB
+; .proc HERO_DIED              ; $0953
+; .proc PRINT_CREDITS          ; $10FC
+
+
+; =============================================================================
+; 7. BASIC LOADER STUB
+; =============================================================================
+;
+; The standard pattern for a self-starting PRG in ca65:
+;
+;         .org $0801
+;         .word @next, 2024              ; ptr to next BASIC line, line number
+;         .byte $9E                      ; SYS token
+;         .byte .sprintf("%d", BOOT)     ; decimal address as ASCII
+;         .byte 0                        ; end of BASIC line
+; @next:  .word 0                        ; end of BASIC program
+;
+; BOOT:
+;         sei
+;         ldx #$FF
+;         txs
+;         ...
+;
+; The line number (2024 above) can be anything; some projects use
+; the year. .sprintf lets the assembler compute the decimal SYS
+; address automatically from the label.
+
+
+; =============================================================================
+; 8. MACROS
+; =============================================================================
+;
+; Macros use UPPER_SNAKE_CASE and are defined with .macro/.endmacro.
+; Called WITHOUT a # prefix (unlike 64tass):
+;
+; .macro WAIT_RASTER_AT_BOTTOM
+;         lda RASTER_TICK
+; @L00:   cmp RASTER_TICK
+;         beq @L00
+; .endmacro
+;
+; Usage:
+;         WAIT_RASTER_AT_BOTTOM
+;
+; Macros with parameters:
+;
+; .macro SET_VIC_BANK bank
+;         lda $DD00
+;         and #$FC
+;         ora #(3 - bank)
+;         sta $DD00
+; .endmacro
+;
+; Usage:
+;         SET_VIC_BANK 2
+;
+; Keep macros short (under ~10 instructions). If it is longer, make
+; it a subroutine instead.
+
+
+; =============================================================================
+; 9. CONDITIONAL ASSEMBLY (FEATURE FLAGS)
+; =============================================================================
+;
+; Use for behaviour changes, debug aids, or optional optimisations:
+;
+; ENABLE_DEBUG = 0
+; ENABLE_AUTOFIRE = 1
+;
+; .if ENABLE_DEBUG = 1
+;         inc $D020
+; .endif
+;
+; .if ENABLE_DOUBLE_JOYSTICKS = 1
+;         jsr HANDLE_JOY1
+;         jsr HANDLE_JOY2
+; .else
+;         jsr HANDLE_JOY2
+; .endif
+;
+; Also available: .ifdef, .ifndef, .ifblank, .ifnblank for testing
+; whether symbols are defined or macro parameters are present.
+;
+; Feature flags go at the TOP of the file, before any symbol defs,
+; with a comment explaining each one.
+
+
+; =============================================================================
+; 10. DATA DIRECTIVES
+; =============================================================================
+;
+; .byte    raw byte values (hex preferred for data, decimal for counts)
+; .word    16-bit little-endian values (addresses, pointers)
+; .addr    alias for .word (use for address tables for clarity)
+; .asciiz  null-terminated ASCII string
+; .res     reserve N bytes, optionally filled with a value
+; .incbin  include a raw binary file verbatim
+; .include include another assembly source file
+;
+; Data tables should have a label, a comment explaining the format,
+; and (where practical) per-row annotations:
+;
+; CREDITS_TXT:                           ; $1143
+;         .byte $20,$20,$20,$20,$20,$20  ; row 0: padding
+;         .byte $5F,$66,$63,$6E,$5F,$20  ; row 0: "PRESENTS"
+;         ...
+;
+; Large binary blobs (charsets, sprite banks, level maps) should be
+; extracted to separate .bin files and included with .incbin:
+;
+;         .org $E400
+; .incbin "sprites.bin"
+
+
+; =============================================================================
+; 11. SPRITE AND HARDWARE REGISTER CONVENTIONS
+; =============================================================================
+;
+; Use parallel arrays for per-sprite fields, named with a common
+; prefix and slot suffixes:
+;
+; SPRITES_X_LO00 = $0620
+; SPRITES_X_LO01 = $0621
+; SPRITES_X_LO04 = $0624
+;
+; SPRITES_Y00 = $0640
+; SPRITES_Y01 = $0641
+;
+; SPRITES_PTR00 = $06A0
+; SPRITES_TYPE00 = $0700
+;
+; Temporary per-sprite scratch variables get a TMP prefix:
+;
+; SPRITES_TMP_A01 = $0721
+; SPRITES_TMP_B05 = $0745
+;
+; Hardware registers: use their canonical names from the C64
+; reference (Mapping the C64), or at minimum note the register
+; name in an inline comment:
+;
+;         sta $D015    ; Sprite enable register
+;         lda $DC0D    ; CIA1: Interrupt Control Register
+;
+; Alternatively, define constants for commonly-used registers:
+;
+; VIC_SPR_ENA = $D015
+; VIC_RASTER = $D012
+; CIA1_ICR = $DC0D
+
+
+; =============================================================================
+; 12. BUILD VERIFICATION
+; =============================================================================
+;
+; The Makefile should include a checksum verification step that
+; compares the assembled output against the known-good original
+; binary. This is the ultimate proof that the disassembly is correct
+; and complete:
+;
+; game.prg: src/main.asm src/game.cfg
+;     ca65 -t c64 -o bin/game.o src/main.asm
+;     ld65 -o bin/game.prg -C src/game.cfg bin/game.o
+;     echo "e5c40d3a4b23702af14c6af804dc5063  bin/game.prg" | md5sum -c
+;
+; Until the checksum passes, the project is not done. This single
+; test replaces thousands of lines of manual verification.
+
+
+; =============================================================================
+; 13. PROGRESS TRACKING
+; =============================================================================
+;
+; Track reverse-engineering progress by counting:
+;   - Named (descriptive) labels vs placeholder (aXXXX/pXX) labels
+;   - Bytes classified as CODE vs DATA vs UNKNOWN
+;   - Subsystems fully documented vs partially explored vs untouched
+;
+; Maintain a coverage report (text file or comment block) showing a
+; memory map with per-256-byte-block classification:
+;
+;   $0000: ........d.......
+;   $1000: ......d.........
+;   $2000: ....DDDDDDDDDDDD
+;   $3000: ........CCCCCCCC
+;   ...
+;
+; where C=verified code, D=known data, .=unknown.
+
+
+; =============================================================================
+; 14. .PROC SCOPING PATTERN (ca65-specific)
+; =============================================================================
+;
+; ca65's .proc/.endproc is the primary way to keep label namespaces
+; clean. Every routine that has internal branch targets should be
+; wrapped in a .proc block:
+;
+; .proc GAME_LOOP              ; $08CB
+;         WAIT_RASTER_AT_BOTTOM
+;         jsr MUSIC_PLAY
+;
+;         lda V_SCROLL_DELTA
+;         beq no_scroll
+;         jsr LEVEL_DRAW_VIEWPORT
+;         jmp GAME_LOOP
+;
+; no_scroll:
+;         inc GAME_TICK
+;         jsr ANIM_ENEMIES
+;         jsr ANIM_HERO
+;
+;         lda IS_HERO_DEAD
+;         bne hero_dead
+;         jsr HANDLE_JOY2
+;         jmp GAME_LOOP
+;
+; hero_dead:
+;         jmp HERO_DIED
+; .endproc
+;
+; Labels inside a .proc block (like "no_scroll" and "hero_dead"
+; above) are invisible outside it, so the same names can be reused
+; freely in other routines. External code calls the routine by its
+; .proc name (GAME_LOOP), which remains globally visible.
+;
+; For very short routines (under ~5 instructions), a .proc block
+; is optional -- a bare global label with @-prefixed cheap locals
+; is fine.
+
+
+; =============================================================================
+; 15. QUICK REFERENCE: NAMING AT A GLANCE
+; =============================================================================
+;
+;   UPPER_SNAKE_CASE     routine names, named constants, named variables
+;   Z_UPPER_SNAKE        zero-page variable, purpose known
+;   aXXXX                absolute address, purpose unknown (placeholder)
+;   pXX                  zero-page pointer pair, purpose unknown
+;   fXXXX                field/data table, purpose unknown
+;   @L00, @L01           cheap local branch targets (between global labels)
+;   .proc NAME           procedure-scoped routine (recommended for ca65)
+;   ENABLE_*             build-time feature flag (0 or 1)
+;   TOTAL_*              build-time constant
+;   *_LO, *_HI           low/high byte of a 16-bit value
+;   *_LSB, *_MSB         alternative low/high naming
+;   *_IDX                index variable
+;   *_TBL                lookup table
+;   *_TXT                text string data
+;   *_PTR                pointer variable
+;   *_DELTA              movement/change amount
+;   *_TICK               frame counter
+;   *_NR                 number/count
+;   IS_*                 boolean flag (0 or 1)
+;   TMP_*                temporary/scratch variable

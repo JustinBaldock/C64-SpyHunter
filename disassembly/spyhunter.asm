@@ -13,26 +13,42 @@
 ; ANNOTATION NOTE
 ;   Labels, variable names and comments below are a best-effort reverse-
 ;   engineering pass. Confident names are plain; guesses are marked "(???)".
-;   Only ~32% of the ROM is executable code (68 subroutines); the rest is
-;   graphics, screen/road tables and SID music data, shown as .byte blocks.
 ;   None of the renaming changes a single assembled byte.
 ;
+; -----------------------------------------------------------------------------
+; SNAPSHOT-VERIFIED FINDINGS  (from live VICE .vsf snapshots)
+;   Live state read from snapshots and cross-checked with the labels below.
+;   VICE C64MEM module stores 4 bytes (pport.data,dir,exrom,game) before the
+;   65536-byte RAM image; read at payload+4 (verified by SPRITE_PTRS $4D2B ==
+;   SPRPTR_7800 $7BF8, copied every frame in COPY_SPRITE_REGS).
+;
+;   SCORE   $E0/$E1/$E2   3-byte LE BCD   (125/1200/1950/6000/6050 observed)
+;   HISCORE $02/$03/$04   3-byte LE BCD   (tracks score while setting the record)
+;   TIMER   $4D01/$4D02   GAME_TIME_LO/HI BCD, -1 every 4th frame
+;   WEAPON  $4D1E=$01 = machine guns (default); special-weapon charge lives in
+;           the ammo counters $F6-$F9 (picking up smoke in the van set $F7=$FF).
+;
+;   ROAD MAP (full graph in disassembly/spyhunter_map_findings.asm):
+;     Level = linked graph of road segments walked by IRQ_BOTTOM_SCROLL.
+;     ROAD_SEG_TBL ($AC17) = 32 x (main,branch) next-segment ids; the branch
+;     (odd) entry is taken when SCENE_IDX >= $13.  Snapshots: LEFT fork ->
+;     SCENE_IDX < $13 (main/even), RIGHT fork -> SCENE_IDX >= $13 (branch/odd).
+;     Start sentinel ROAD_SEG_IDX=$1F -> segment $01 (first fork $02 vs $03).
+;
+;   WEAPONS VAN: player = object slot 1; HERO_STATE $A3 $FF->$03 when in van;
+;     hero sub-state $A0=$04; SCENE_ID $A8->$FF.  Sequence freezes the world:
+;     SCROLL_SPEED $34->$00, TIMER_ENABLE $E3->$00.  Van = hardware sprite 1,
+;     pointer $5E -> graphics $5780; new weapon granted on exit, not inside.
+;
 ; RUNTIME MEMORY MAP
-;   $00-$01        6510 I/O port (RAM/ROM banking; game runs with $01=$05)
-;   $02-$04        high score (3-byte BCD)
-;   $12-$2F        working pointers (copy/scroll/stream/road)
-;   $34-$41        IRQ / raster split state (colours, D011/D018 shadows)
-;   $52-$6D        SID sound-engine per-voice state
-;   $CA-$DA        sprite coordinate shadow (flushed to $D000-$D010 each frame)
-;   $E0-$E2        current score (3-byte BCD)
-;   $2800-$2FFF    speed-critical routine copied into RAM (JSR $2802 from IRQ)
-;   $4000-$7FFF    VIC bank 1 graphics (selected via CIA2_PRA=$02)
-;   $4D00-$4DFF    game-state variables (score/lives/enemy + object tables)
-;   $6400/$7800/$7C00  screen buffers (title / play / high-score)
-;   $6800/$7000    two character sets (playfield graphics / text)
-;   $8000-$BFFF    this ROM: code + data
-;   $D800-$DBFF    colour RAM
-;   $E000-$FFFF    RAM; CPU vectors live at $FFFA-$FFFF
+;   $00-$01 6510 I/O port ($01=$05 run) ; $02-$04 high score BCD
+;   $12-$2F working pointers            ; $34-$41 IRQ/raster split state
+;   $52-$6D SID per-voice state         ; $CA-$DA sprite coord shadow ->$D000
+;   $E0-$E2 current score BCD           ; $2800-$2FFF speed routine (JSR $2802)
+;   $4000-$7FFF VIC bank 1 graphics     ; $4D00-$4DFF game-state variables
+;   $6400/$7800/$7C00 screen buffers    ; $6800/$7000 two charsets
+;   $8000-$BFFF this ROM                ; $D800-$DBFF colour RAM
+;   $E000-$FFFF RAM (CPU vectors $FFFA-$FFFF)
 ; =============================================================================
 .setcpu "6502"
 ; =============================================================================
@@ -101,7 +117,7 @@ VSCROLL_POS = $3E    ; vertical scroll accumulator
 D018_SHADOW = $3F    ; shadow of VIC_MEMPTR
 D018_ALT = $40    ; alternate VIC_MEMPTR
 COPY_BLOCK_FLAG = $41    ; IRQ: do block-copy this frame
-ROAD_SEG_IDX = $42    ; road segment index
+ROAD_SEG_IDX = $42    ; road segment index (start sentinel $1F)
 ROAD_SEG_LEN = $43    ; road segment length
 ROAD_FEATURE = $44    ; current road feature code
 PREV_FEATURE = $45    ; previous road feature
@@ -109,7 +125,7 @@ SEG_REPEAT = $46    ; segment repeat count
 SEG_REPEAT_INIT = $47
 ROW_REPEAT = $48    ; row repeat count
 SEQ_STATE = $49    ; sequence/animation state (0..6)
-SCENE_IDX = $4A    ; current scene/level index
+SCENE_IDX = $4A    ; scene/level index; >=$13 selects road branch (right fork)
 SND_VOICE = $4B    ; music: current voice
 SND_REGOFS = $4C    ; music: SID register offset
 SND_PTR_LO = $4D    ; music: work ptr lo
@@ -143,14 +159,14 @@ BLIT_COL = $98    ; object screen column
 BLIT_ROW = $99    ; object screen row
 OBJ_ANIM = $9A    ; per-object animation frame
 FLAG_A1 = $A1    ; flag (???)
-OBJ_TYPE = $A2    ; per-object type ($FF=empty)
-HERO_STATE = $A3    ; hero state (???)
-SCENE_ID = $A8    ; high-level scene id (car/boat/...)
+OBJ_TYPE = $A2    ; per-object type ($FF=empty); slot1=hero, =$03 in weapons van
+HERO_STATE = $A3    ; hero state = OBJ_TYPE[1]; $FF normal, $03 in weapons van
+SCENE_ID = $A8    ; high-level scene id (car/boat/...); $FF during van sequence
 ANIM_STATE = $A9    ; sub-state / animation selector (???)
 SPR_STAGE = $BA    ; staged hardware sprite coords
 SPR_X_SHADOW = $CA    ; sprite X shadow (->$D000)
 SPR_Y_SHADOW = $CB    ; sprite Y shadow
-SPAWN_Y = $CD    ; object spawn y (???)
+SPAWN_Y = $CD    ; object spawn y (= sprite1 Y shadow; van vertical pos)
 SPR_XMSB = $DA    ; sprite X bit-8 shadow (->$D010)
 RNG_SEED = $DB    ; PRNG seed
 SCORE_OVFL = $DC    ; score overflow / millions (???)
@@ -160,7 +176,7 @@ HIT_MASK_B = $DF    ; collision result B
 SCORE_LO = $E0    ; score BCD (lo)
 SCORE_MID = $E1    ; score BCD (mid)
 SCORE_HI = $E2    ; score BCD (hi)
-TIMER_ENABLE = $E3    ; game-timer enable
+TIMER_ENABLE = $E3    ; game-timer enable ($00 freezes it, e.g. in the van)
 FX_TIMER0 = $E4    ; hazard/effect timer 0
 FX_TIMER1 = $E5    ; effect timer 1
 FX_TIMER2 = $E6    ; effect timer 2
@@ -176,7 +192,7 @@ DEMO_TIMER = $EE    ; attract/demo countdown (???)
 START_HELD = $EF    ; start-button held counter (???)
 KEY_LAST = $F3    ; last key seen
 GUN_HEAT = $F6    ; weapon/ammo counter (???)
-MISSILE_CNT = $F7    ; missile count (???)
+MISSILE_CNT = $F7    ; special-weapon charge; smoke pickup set this =$FF (???)
 PANEL_X = $F8    ; panel draw column (???)
 SMOKE_CNT = $F9    ; smoke count (???)
 ROAD_PHASE = $FA    ; road lane phase
@@ -194,7 +210,7 @@ VEC_SCROLL_HI = $2898
 ROWADDR_LO = $2899    ; screen row-address table lo
 ROWADDR_HI = $289A    ; screen row-address table hi
 FRAME_FLAG = $4D00    ; IRQ frame counter (waited on)
-GAME_TIME_LO = $4D01    ; game timer BCD lo
+GAME_TIME_LO = $4D01    ; game timer BCD lo (on-screen timer)
 GAME_TIME_HI = $4D02    ; game timer BCD hi
 IRQ_TOGGLE = $4D03    ; IRQ scroll toggle
 STATE_4D05 = $4D05
@@ -219,12 +235,12 @@ MUX_SLOT0 = $4D1A    ; active mux slot 0
 MUX_SLOT1 = $4D1B    ; active mux slot 1
 MUX_SLOT2 = $4D1C    ; active mux slot 2
 STATE_4D1D = $4D1D
-WEAPON_STATE = $4D1E    ; weapon state (???)
+WEAPON_STATE = $4D1E    ; weapon state ($01=machine guns; special = ammo $F6-$F9)
 HIT_GROUP0 = $4D1F    ; collision group mask 0
 HIT_GROUP1 = $4D20    ; collision group mask 1
 HIT_GROUP2 = $4D21    ; collision group mask 2
 HIT_ACCUM = $4D22    ; collision accumulator
-SPRITE_PTRS = $4D2B    ; sprite pointer shadow
+SPRITE_PTRS = $4D2B    ; sprite pointer shadow (copied to $7BF8 each frame)
 OBJ_TBL63 = $4D63
 OBJ_TBL69 = $4D69
 OBJ_TBL6B = $4D6B
@@ -349,15 +365,13 @@ SND_SEQPTR_HI = $BD18
 
 ; -----------------------------------------------------------------------
 ; Cartridge autostart header: cold/warm vectors -> RESET ($8027), the
-; "CBM80" magic the KERNAL looks for, and the ASCII build stamp
-; "9/14/84,VER-1.1,(C)1983 BALLY".
+; "CBM80" magic the KERNAL looks for, and the ASCII build stamp.
     .byte $27,$80,$27,$80,$C3,$C2,$CD,$38,$30,$30,$39,$2F,$31,$34,$2F,$38
     .byte $34,$2C,$56,$45,$52,$2D,$31,$2E,$31,$2C,$28,$43,$29,$31,$39,$38
     .byte $33,$20,$42,$41,$4C,$4C,$59
 
 ; -----------------------------------------------------------------------
-; RESET / cold + warm entry ($8027). Reached via the CBM80 autostart
-; vectors in the header. Masks IRQs, resets the stack, and runs INIT_SYSTEM.
+; RESET / cold + warm entry ($8027).
 RESET:
     sei
     cld
@@ -371,9 +385,7 @@ RESET:
     jsr INIT_SYSTEM
 
 ; -----------------------------------------------------------------------
-; Top-level game state loop. These four entry points re-run the
-; attract screen, the player-select menu, play setup, and the per-frame
-; game loop as the GAME_STATE machine advances.
+; Top-level game state loop.
 MAIN_RUN_ATTRACT:
     jsr ATTRACT_TITLE
 
@@ -385,10 +397,7 @@ MAIN_RUN_PLAY:
     jsr MUSIC_START_THEME
 
 ; -----------------------------------------------------------------------
-; Per-frame master loop. Runs each subsystem once: frame/timer sync,
-; the moving-object engine, scene select, weapons, status panel, score
-; tally and sound; dispatches the active state handler (GAME_DISPATCH);
-; then reads the joystick/start button to drive the state machine.
+; Per-frame master loop.
 GAME_LOOP:
     jsr WAIT_FRAME_TIMER
     jsr PROCESS_OBJECTS
@@ -468,15 +477,12 @@ L80D5:
     jmp MAIN_RUN_MENU
 
 ; -----------------------------------------------------------------------
-; Enter the current game-state handler via VEC_STATE ($2895),
-; set up by INIT_PLAY_STATE (attract / demo / play / high-score).
+; Enter the current game-state handler via VEC_STATE ($2895).
 GAME_DISPATCH:
     jmp (VEC_STATE)
 
 ; -----------------------------------------------------------------------
-; One-time system init: bank in RAM ($01), blank the VIC, build the two
-; custom character sets, clear screen/colour RAM, install the CPU vectors
-; ($FFFA-$FFFF) and the first raster IRQ, then CLI. Called once from RESET.
+; One-time system init.
 INIT_SYSTEM:
     lda #$80
     tay
@@ -661,14 +667,12 @@ L81D8:
     cli
     rts
 ; -----------------------------------------------------------------------
-; PANEL_LABELS_TBL: 20 screen char-codes drawn to the status panel by
-; ATTRACT_TITLE.
+; PANEL_LABELS_TBL: 20 screen char-codes drawn to the status panel by ATTRACT_TITLE.
     .byte $32,$02,$2E,$08,$12,$1A,$40,$32,$18,$18,$02,$04,$40,$66,$70,$72
     .byte $62,$52,$06,$50
 
 ; -----------------------------------------------------------------------
-; Draw the attract/title status line (PANEL_LABELS_TBL) and poll for
-; input to leave attract mode.  (??? exact screen unconfirmed)
+; Draw the attract/title status line and poll for input.
 ATTRACT_TITLE:
     jsr RESET_SCREEN_STATE
     jsr DELAY_FRAMES_ALT
@@ -690,14 +694,12 @@ L827F:
     sta GAME_STATE
     rts
 ; -----------------------------------------------------------------------
-; MENU_MSG_TBL / MENU_MSG_TBL_B: char-codes for the player-select / demo
-; screen (ATTRACT_MENU).
+; MENU_MSG_TBL / MENU_MSG_TBL_B: char-codes for the player-select / demo screen.
     .byte $28,$24,$0A,$20,$30,$0A,$40,$24,$1E,$40,$0A,$06,$12,$2C,$1E,$1C
     .byte $0A,$24,$1E,$06,$26,$40,$10,$0E,$12,$10
 
 ; -----------------------------------------------------------------------
-; Player-select / demo screen: draw MENU_MSG_TBL, read the joystick to
-; choose 1- or 2-player (NUM_PLAYERS) and detect start.  (???)
+; Player-select / demo screen.
 ATTRACT_MENU:
     jsr RESET_SCREEN_STATE
     lda GAME_STATE
@@ -776,9 +778,7 @@ L8318:
     rts
 
 ; -----------------------------------------------------------------------
-; Set up a fresh play state: score/lives/BCD timer, sprite enable and
-; sprite multicolours, the active sprite-multiplex slots (MUX_SLOT0..2),
-; and the VEC_STATE dispatch vector for the selected mode.
+; Set up a fresh play state.
 INIT_PLAY_STATE:
     jsr CLEAR_RAM_AND_SPRITES
     jsr DELAY_FRAMES_ALT
@@ -845,8 +845,7 @@ RESET_SCREEN_STATE:
     jsr CLEAR_PANEL
 
 ; -----------------------------------------------------------------------
-; Fill colour RAM, init the SID, zero ZP $DC-$FF, clear all 8 object
-; slots (INIT_OBJECT_SLOT), then push the sprite registers to the VIC.
+; Fill colour RAM, init SID, zero ZP $DC-$FF, clear object slots, push sprites.
 CLEAR_RAM_AND_SPRITES:
     jsr CLEAR_COLOR_RAM
     jsr SID_INIT
@@ -874,9 +873,7 @@ L83B0:
     jmp LA361
 
 ; -----------------------------------------------------------------------
-; Raster IRQ, top of frame ($83C3, vectored from IRQ_MAIN). Sets the
-; status-panel colours (from BORDER_COL_TOP/MC_COL*_TOP), programs the next
-; raster split and points the IRQ vector back at IRQ_MAIN, then RTI.
+; Raster IRQ, top of frame ($83C3, vectored from IRQ_MAIN).
 IRQ_TOP_PANEL:
     pha
     txa
@@ -919,10 +916,7 @@ SCROLL_DISPATCH:
     jmp (VEC_SCROLL)
 
 ; -----------------------------------------------------------------------
-; Main raster IRQ ($8402). At the split line it swaps screen buffer,
-; charset and palette (D011/D018/border/bg from the $3D-$41 shadows),
-; runs the object draw + sprite multiplex, scrolls the road, updates
-; colour RAM and (at the bottom split) calls the music driver.
+; Main raster IRQ ($8402).
 IRQ_MAIN:
     cld
     pha
@@ -1045,9 +1039,7 @@ L84D2:
     jmp IRQ_EXIT
 
 ; -----------------------------------------------------------------------
-; Bottom-of-frame path of the IRQ: advance the vertical road scroll
-; (VSCROLL_POS / SCROLL_SPEED), step the road-segment tables, and pick the
-; next scroll dispatch vector.
+; Bottom-of-frame path of the IRQ: advance scroll, step road-segment tables.
 IRQ_BOTTOM_SCROLL:
     lda #$00
     sta VIC_BORDER
@@ -1239,8 +1231,7 @@ IRQ_EXIT:
     pla
     rti
 ; -----------------------------------------------------------------------
-; SCROLL_VEC_TBL: scroll-dispatch bytes selected by the IRQ_TOGGLE bit
-; (pairs of pointer bytes for the road-scroll chunk).
+; SCROLL_VEC_TBL: scroll-dispatch bytes selected by the IRQ_TOGGLE bit.
     .byte $04,$78,$01,$16,$04,$7C,$00,$04
 
 ; -----------------------------------------------------------------------
@@ -1367,8 +1358,7 @@ L86E4:
     jsr PTR_AUX_INC
     rts
 ; -----------------------------------------------------------------------
-; SPEEDCODE_IMAGE: a small 6502 routine kept here as data; the game runs it
-; from the $2800 RAM block (called from the IRQ as JSR SPEEDCODE=$2802).  (???)
+; SPEEDCODE_IMAGE: a small 6502 routine kept here as data; run from $2800 RAM.
     .byte $04,$03,$02,$01,$00,$A5,$33,$4A,$90,$07,$A4,$A8,$C0,$05,$F0,$01
     .byte $4A,$A5,$B8,$90,$03,$ED,$09,$4D,$30,$02,$A9,$00,$C9,$F8,$10,$02
     .byte $A9,$F8,$85,$B8,$18,$65,$35,$18,$65,$D7,$85,$D7,$4A,$4A,$4A,$4A
@@ -1381,8 +1371,7 @@ L86E4:
     .byte $85,$DA,$60
 
 ; -----------------------------------------------------------------------
-; Decompress a custom multicolour character set from a byte-stream
-; (via STREAM_NEXT_BYTE): run-length spans plus mirrored/flipped cells.
+; Decompress a custom multicolour character set from a byte-stream.
 UNPACK_CHARSET:
     lda #$00
     sta DST_PTR
@@ -1621,8 +1610,7 @@ L88CA:
     beq L889B
 
 ; -----------------------------------------------------------------------
-; Convert a moving object's world position to a screen cell and stage its
-; sprite; update its collision-group bit in HIT_ACCUM.
+; Convert a moving object's world position to a screen cell and stage its sprite.
 OBJ_CALC_SCREEN_POS:
     ldx OBJ_IDX
     clc
@@ -1730,8 +1718,7 @@ L8977:
     sta OBJ_TBL63,x
     rts
 ; -----------------------------------------------------------------------
-; OBJ_DIST_TBL: object distance thresholds, followed by auxiliary object-
-; classification code stored as data (entered via computed jumps).
+; OBJ_DIST_TBL: object distance thresholds, followed by aux data (computed jumps).
     .byte $04,$08,$14,$1C,$24,$30,$38,$40,$72,$7A,$A7,$AD,$B7,$A9,$00,$85
     .byte $12,$A9,$78,$85,$13,$A9,$0F,$D0,$0A,$A9,$C0,$85,$12,$A9,$7B,$85
     .byte $13,$A9,$F3,$99,$CB,$00,$A9,$00,$A0,$04,$06,$08,$90,$04,$A9,$08
@@ -1743,8 +1730,7 @@ L8977:
     .byte $A5,$05,$90,$04,$05,$DA,$D0,$04,$49,$FF,$25,$DA,$85,$DA,$18,$60
 
 ; -----------------------------------------------------------------------
-; Compute the object's on-screen sprite offset and stage the hardware
-; sprite coordinates (SPR_STAGE / $BA area).
+; Compute the object's on-screen sprite offset and stage the hardware sprite.
 OBJ_CALC_SPRITE_DELTA:
     ldy OBJ_IDX2
     ldx #$00
@@ -1842,10 +1828,7 @@ OBJ_VEC2_DISPATCH:
     jmp ($0073)
 
 ; -----------------------------------------------------------------------
-; Moving-object engine (per frame). For each of the 8 object slots: run
-; its type handler, compute its screen/sprite position and collisions, and
-; manage which sprite-multiplex slot it occupies. Drives the many enemy
-; vehicles that exceed the VIC's 8 hardware sprites.
+; Moving-object engine (per frame).
 PROCESS_OBJECTS:
     ldx #$07
     lda #$80
@@ -1947,7 +1930,7 @@ L8B1B:
     sta HIT_MASK_B
     rts
 ; -----------------------------------------------------------------------
-; OBJMOVE_VEC_LO/HI + OBJINIT_PARAM_TBL, then the object / hero state-machine
+; OBJMOVE_VEC_LO/HI + OBJINIT_PARAM_TBL, then object / hero state-machine
 ; handlers stored as data (reached through VEC_OBJMOVE / VEC_STATE).
     .byte $AF,$8B,$D4,$8B,$5B,$8C,$5E,$8C,$5B,$8C,$5E,$8C,$90,$8C,$C2,$8C
     .byte $8E,$9A,$AA,$90,$8E,$9A,$AA,$90,$8E,$9A,$AA,$90,$8E,$9A,$AA,$90
@@ -2000,8 +1983,7 @@ L8B1B:
     .byte $8E,$38,$60,$A4,$07
 
 ; -----------------------------------------------------------------------
-; Clear moving-object slot X: zero its staged X/Y, set type=$FF (empty),
-; reset its sprite pointer and its bits in the collision masks.
+; Clear moving-object slot X.
 INIT_OBJECT_SLOT:
     lda BIT_MASK_INV
     and SPR_XMSB
@@ -2032,8 +2014,7 @@ INIT_OBJECT_SLOT:
     clc
     rts
 ; -----------------------------------------------------------------------
-; State-machine handler code and jump tables (object / hero behaviour),
-; stored as data and dispatched via the $28xx RAM vectors.
+; State-machine handler code and jump tables (object / hero behaviour), as data.
     .byte $44,$04,$04,$04,$04,$66,$04,$04,$00,$86,$04,$06,$86,$82,$86,$86
     .byte $86,$64,$94,$94,$00,$04,$04,$04,$52,$00,$04,$04,$D0,$D0,$D0,$D0
     .byte $10,$CC,$CE,$58,$58,$CC,$48,$4C,$CC,$D2,$CC,$CC,$CA,$5A,$D0,$D0
@@ -2115,8 +2096,7 @@ INIT_OBJECT_SLOT:
     .byte $66,$A8
 
 ; -----------------------------------------------------------------------
-; Start the 3-voice "Peter Gunn" theme: silence SID, then request a
-; sequence on each of the three voices.
+; Start the 3-voice "Peter Gunn" theme.
 MUSIC_START_THEME:
     jsr SOUND_SILENCE
     ldy #$02
@@ -2304,7 +2284,6 @@ SET_SPRITE_PTR:
 
 ; -----------------------------------------------------------------------
 ; Pick the current road section / difficulty (SCENE_IDX) from game state.
-; (??? mapping of inputs to scene not fully confirmed)
 UPDATE_SCENE_SELECT:
     lda SEQ_STATE
     beq L9DEF
@@ -2386,8 +2365,7 @@ L9E31:
     rts
 
 ; -----------------------------------------------------------------------
-; Decode the road/scene layout stream into RAM, expanding runs and
-; mirrored rows (uses MAP_EXPAND_RUN / MAP_COPY_BLOCK / DRAW_*_ROWS).
+; Decode the road/scene layout stream into RAM (runs + mirrored rows).
 UNPACK_MAP_DATA:
     lda #$60
     sta MAP_SRC
@@ -2859,8 +2837,7 @@ RNG_NEXT:
     rts
 
 ; -----------------------------------------------------------------------
-; Fetch the next byte from STREAM_PTR and post-increment the pointer.
-; Returns the byte in A (and X).
+; Fetch the next byte from STREAM_PTR and post-increment.
 STREAM_NEXT_BYTE:
     ldx #$00
     lda (STREAM_PTR,x)
@@ -2873,7 +2850,7 @@ LA120:
     rts
 
 ; -----------------------------------------------------------------------
-; Advance the SRC_PTR ($12/$13) by 1 (PTR_SRC_INC) or by A (PTR_SRC_ADD).
+; Advance SRC_PTR by 1 (PTR_SRC_INC) or by A (PTR_SRC_ADD).
 PTR_SRC_INC:
     lda #$01
 
@@ -2888,7 +2865,7 @@ LA12D:
     rts
 
 ; -----------------------------------------------------------------------
-; Advance the DST_PTR ($14/$15) by 1 (PTR_DST_INC) or by A (PTR_DST_ADD).
+; Advance DST_PTR by 1 or by A.
 PTR_DST_INC:
     lda #$01
 
@@ -2903,7 +2880,7 @@ LA139:
     rts
 
 ; -----------------------------------------------------------------------
-; Advance the DST2_PTR ($16/$17) by 1 (PTR_AUX_INC) or by A (PTR_AUX_ADD).
+; Advance DST2_PTR by 1 or by A.
 PTR_AUX_INC:
     lda #$01
 
@@ -3053,7 +3030,6 @@ LA238:
 
 ; -----------------------------------------------------------------------
 ; Busy-wait some frames using the IRQ COPY_BLOCK_FLAG / FRAME_SUBCTR.
-; DELAY_FRAMES_ALT is a second entry that presets A (=$1A) via the skip-trick.
 DELAY_FRAMES:
     lda SCROLL_SPEED
     bne LA249
@@ -3094,7 +3070,6 @@ LA270:
 
 ; -----------------------------------------------------------------------
 ; Blank the status panel (11 cells of blanks via PANEL_PUT_CHAR_PAIR).
-; CLEAR_PANEL_ALT enters with X=$12 preset via the skip-trick.
 CLEAR_PANEL:
     jsr CLEAR_PANEL_ALT
 
@@ -3113,8 +3088,7 @@ LA27B:
     rts
 
 ; -----------------------------------------------------------------------
-; Reset the road-segment index (ROAD_SEG_IDX=$1F). RESET_ROAD_INDEX_ALT
-; enters with A=$1D preset via the skip-trick.
+; Reset the road-segment index (ROAD_SEG_IDX=$1F).
 RESET_ROAD_INDEX:
     lda #$1F
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
@@ -3123,8 +3097,7 @@ RESET_ROAD_INDEX_ALT:
     sta ROAD_SEG_IDX
 
 ; -----------------------------------------------------------------------
-; Reset scroll/segment counters (ROW_REPEAT/SEG_REPEAT/ROAD_SEG_LEN)
-; and SCENE_IDX for a new scene.
+; Reset scroll/segment counters and SCENE_IDX for a new scene.
 RESET_SCROLL_VARS:
     lda #$01
     sta ROW_REPEAT
@@ -3146,9 +3119,7 @@ RESET_SCROLL_VARS:
     .byte $5A,$99,$C8,$5A,$99,$CE,$5A,$99,$1E,$5B,$60
 
 ; -----------------------------------------------------------------------
-; Wait for the IRQ frame flag; every 4th frame decrement the BCD game
-; timer (GAME_TIME_LO/HI) and flag end-of-life when it reaches 0. Then falls
-; into COPY_SPRITE_REGS below.
+; Wait for the IRQ frame flag; every 4th frame decrement the BCD game timer.
 WAIT_FRAME_TIMER:
     lda FRAME_FLAG
     cmp #$02
@@ -3182,8 +3153,7 @@ WAIT_FRAME_TIMER:
     inc FLAG_FC
 
 ; -----------------------------------------------------------------------
-; COPY_SPRITE_REGS: push the staged sprite coords (SPR_X_SHADOW..) to the VIC
-; sprite registers ($D000-$D010) and the sprite pointers to both screens.
+; COPY_SPRITE_REGS: push staged sprite coords to $D000-$D010 and pointers to screens.
 LA361:
     ldy #$10
 
@@ -3203,9 +3173,7 @@ LA36E:
     rts
 
 ; -----------------------------------------------------------------------
-; Blit a multi-character object (car / weapons van / boat) into the
-; scrolling screen with colour, and record its sprite-multiplex raster lines
-; in the SPRMUX_CNT array.
+; Blit a multi-character object (car / weapons van / boat) into the screen.
 DRAW_OBJECT_TILES:
     ldx BLIT_ROWS
     bne LA380
@@ -3386,9 +3354,7 @@ LA472:
     bmi LA453
 
 ; -----------------------------------------------------------------------
-; Per-frame weapon / special-vehicle update. Fires the smoke/missile
-; effects (MISSILE_CNT / SMOKE_CNT), triggers their sounds, and streams the
-; weapons-van graphics into view via DRAW_OBJECT_TILES.  (???)
+; Per-frame weapon / special-vehicle update (weapons van, smoke/missile fx).
 UPDATE_WEAPONS:
     lda BLIT_ROWS
     bne LA493
@@ -3519,8 +3485,7 @@ LA515:
     .byte $2C,$27,$2C,$19,$14,$24,$25,$2C,$2C,$28,$10,$10,$25,$2C,$24,$10
 
 ; -----------------------------------------------------------------------
-; Advance and draw the road weapon/hazard effects (oil slick, smoke,
-; water, debris) using the FX_* state and FX_PARAM_* tables.  (???)
+; Advance and draw the road weapon/hazard effects using the FX_* state.
 UPDATE_HAZARDS:
     jsr DRAW_OBJECT_TILES
     ldx #$05
@@ -3677,8 +3642,7 @@ LA785:
     .byte $14,$B0,$04,$A9,$05,$85,$E8,$A4,$07,$60,$1C,$1E,$40,$20,$28,$26
 
 ; -----------------------------------------------------------------------
-; Award any queued scoring events (SCORE_EVENT[]): add the matching
-; POINTS_TBL value via ADD_SCORE.  (???)
+; Award any queued scoring events (SCORE_EVENT[]).
 TALLY_SCORE_EVENTS:
     ldx #$07
     lda STATE_4DCB
@@ -3745,13 +3709,11 @@ LA88D:
     bpl LA88D
     brk
 ; -----------------------------------------------------------------------
-; POINTS_TBL_HI plus the score-event delta table (ADD_SCORE / TALLY_SCORE_EVENTS).
+; POINTS_TBL_HI plus the score-event delta table.
     .byte $00,$15,$00,$25,$00,$50,$01,$00,$05,$00,$07,$00,$15
 
 ; -----------------------------------------------------------------------
-; Add POINTS_TBL[Y] to the BCD score (SCORE_LO/MID/HI), update the high
-; score and the next-extra-life threshold (granting a life + jingle when
-; passed), then redraw the score.
+; Add POINTS_TBL[Y] to the BCD score, update high score / extra life, redraw.
 ADD_SCORE:
     sed
     clc
@@ -3853,8 +3815,7 @@ LA934:
     rts
 
 ; -----------------------------------------------------------------------
-; PANEL_PUT_DIGIT/PANEL_PUT_CHAR_PAIR: write a 2-char cell pair into the
-; two status-panel screen rows (PANEL_SCR0 / PANEL_SCR1).
+; PANEL_PUT_DIGIT/PANEL_PUT_CHAR_PAIR: write a 2-char cell pair into the panel.
 PANEL_PUT_DIGIT:
     asl a
     clc
@@ -3884,8 +3845,7 @@ LA955:
     .byte $80,$82,$84,$86
 
 ; -----------------------------------------------------------------------
-; Draw the panel indicators: weapon/fuel icons (PANEL_ICON_TBL) and the
-; extra-life marker.
+; Draw the panel indicators: weapon/fuel icons and the extra-life marker.
 DRAW_STATUS_PANEL:
     ldx #$1C
     stx PANEL_X
@@ -4020,8 +3980,7 @@ LAA16:
     .byte $FF,$FF
 
 ; -----------------------------------------------------------------------
-; Read the pause/mute console keys (PAUSEKEY_TBL), debounce them, and
-; toggle freeze/mute (stops the scroll and silences SID).
+; Read the pause/mute console keys, debounce, toggle freeze/mute.
 HANDLE_PAUSE_KEYS:
     lda SCROLL_SPEED
     pha
@@ -4064,11 +4023,11 @@ LAA5C:
     sta SCROLL_SPEED
     rts
 ; -----------------------------------------------------------------------
-; PAUSEKEY_TBL: the three key scan codes HANDLE_PAUSE_KEYS watches ($3C,$3A,$3B).
+; PAUSEKEY_TBL: the three key scan codes HANDLE_PAUSE_KEYS watches.
     .byte $3C,$3A,$3B
 
 ; -----------------------------------------------------------------------
-; Clear all 25 SID registers ($D400-$D418) and set master volume $0F.
+; Clear all 25 SID registers and set master volume $0F.
 SID_INIT:
     jsr SOUND_SILENCE
     lda #$00
@@ -4083,8 +4042,7 @@ LAA6A:
     rts
 
 ; -----------------------------------------------------------------------
-; Request sound sequence Y on a SID voice. SOUND_REQ_V0/V0B/V1/V2 are the
-; per-voice entry points; the sequence is allocated to a free voice.
+; Request sound sequence Y on a SID voice.
 SOUND_REQ_V0:
     lda SND_SEQ
     bne LAAA7
@@ -4123,7 +4081,7 @@ LAAA7:
     rts
 
 ; -----------------------------------------------------------------------
-; Gate off all three SID voices (clear the control registers).
+; Gate off all three SID voices.
 SOUND_SILENCE:
     txa
     pha
@@ -4143,9 +4101,7 @@ LAAB9:
     rts
 
 ; -----------------------------------------------------------------------
-; Per-frame SID player (called from the IRQ). Steps each of the 3 voices
-; through its note/effect sequence: notes, portamento slides and instrument
-; changes, reading the SND_* tables around $BCBB-$BD18.
+; Per-frame SID player (called from the IRQ).
 MUSIC_DRIVER:
     lda #$0E
     sta SND_REGOFS
@@ -4299,8 +4255,7 @@ LABFD:
     jmp LAB0A
 
 ; -----------------------------------------------------------------------
-; Write a 16-bit frequency (SND_PTR_LO/HI) to the SID voice selected
-; by SND_VOICE / SND_REGOFS.
+; Write a 16-bit frequency to the SID voice selected by SND_VOICE / SND_REGOFS.
 SID_WRITE_FREQ:
     sty SND_TMP
     ldy SND_REGOFS
@@ -4313,9 +4268,8 @@ SID_WRITE_FREQ:
     rts
 ; -----------------------------------------------------------------------
 ; ROAD_SEG_TBL and its road palette / pointer sub-tables (ROAD_PTR_*/ROAD_*),
-; then the bulk graphics and audio data through $BFFF: the custom charsets,
-; sprite shapes, screen layouts, and the SID music tables
-; (SND_FREQ_* @ $BCBB, SND_DUR/SND_SEQPTR @ $BD13-$BD18) for the Peter Gunn theme.
+; then the bulk graphics and audio data through $BFFF (charsets, sprite shapes,
+; screen layouts, SID music tables) - emitted verbatim from the ROM below.
     .byte $1D,$1D,$02,$03,$08,$05,$06,$04,$07,$07,$07,$07,$07,$07,$10,$10
     .byte $09,$0E,$0A,$0A,$0B,$0B,$0C,$0C,$0D,$0D,$0F,$0F,$0F,$0F,$11,$11
     .byte $12,$0B,$12,$0B,$13,$13,$12,$14,$15,$17,$16,$16,$1A,$1A,$18,$18

@@ -40,6 +40,47 @@
 ;     SCROLL_SPEED $34->$00, TIMER_ENABLE $E3->$00.  Van = hardware sprite 1,
 ;     pointer $5E -> graphics $5780; new weapon granted on exit, not inside.
 ;
+;   SMOKE WEAPON (snapshot "smoke dropped"):
+;     1. Smoke is drawn as MAP CHARACTER TILES, not sprites - UPDATE_WEAPONS
+;        calls DRAW_OBJECT_TILES (the shared road/van blitter) to stamp tiles
+;        straight into the $7800 play buffer (SCREEN_PTR=$7Axx).
+;     2. Smoke tiles: core $10, sides $AD/$AE (mirror), edge variants $B0-$B6;
+;        source = ROM tile-triple table ~$A538-$A567 (STREAM_PTR=$A550), colour
+;        OBJ_COLOR=$09 (brown).
+;     3. Expanding plume: DRAW_OBJECT_TILES spread logic (BLIT_FLAGS) widens the
+;        cloud 3->5->7->9 tiles per row; position BLIT_COL<-STATE_4DB9 ($4DB9),
+;        BLIT_ROW<-STATE_4DC1+2 ($4DC1) = just behind the car.
+;     4. It scrolls with NO code of its own: being in the $7800 road buffer, it
+;        rides the road's vertical scroll (VSCROLL_POS/D011 fine-scroll +
+;        SCROLL_SPEED + the IRQ per-row copy). New tiles stamped each frame.
+;     5. Transient: DRAW_OBJECT_TILES writes only the screen buffer + colour RAM,
+;        never the ROM level/segment tables or road template, so smoke scrolls
+;        off the top and is recycled - it does NOT alter the permanent map.
+;     6. Special-weapon charge = $F7: $FF full on pickup, decrements as used
+;        (seen $FF->$EC).  (This is the "smoke" the player picks; refines the
+;        MISSILE_CNT/SMOKE_CNT (???) guesses on $F6-$F9.)
+;     7. WEAPON_STATE $4D1E stays $01 (machine guns) throughout - the special
+;        weapon is independent of $4D1E, tracked by the ammo counter + fired
+;        via UPDATE_WEAPONS.
+;
+;   WATER / BRIDGE (snapshot "bridge start", still car scene SCENE_ID=$05):
+;     1. Water is MAP CHARACTER TILES in the $7800 road buffer, drawn like the
+;        road - not a sprite, not a separate layer. It just replaces the grass
+;        road margins with water tiles.
+;     2. Water tiles: texture $08-$13, solid water $06, shore/near water $07.
+;        Bridge: rails $30-$3F, upper deck $01, lower deck $02; the two
+;        carriageways are split by a blank ($00) gap.
+;     3. It IS part of the map: the water tiles come from the road-segment
+;        template that the road IRQ copies row-by-row (SCROLL_SRC -> SCROLL_DST),
+;        so water is permanent segment graphics that scroll with the road.
+;        (Contrast: the smoke weapon is transiently blitted and scrolls off.)
+;     4. Water "animation" is free: the texture repeats every ~5 rows; as the
+;        map scrolls the patterned tiles cycle (same trick as lane markers).
+;     5. In-water bridge support/pylon = map tiles $4E/$4F/$50/$51/$52/$53 (2x3),
+;        also drawn as tiles (not a sprite).
+;     6. Water colours are the per-segment split colours (ROAD_BORDER/MC1/MC2):
+;        border/bg $36=$0B, mc1 $37=$0F, mc2 $38=$01 (grey/white, moonlit water).
+;
 ; RUNTIME MEMORY MAP
 ;   $00-$01 6510 I/O port ($01=$05 run) ; $02-$04 high score BCD
 ;   $12-$2F working pointers            ; $34-$41 IRQ/raster split state
@@ -192,7 +233,8 @@ DEMO_TIMER = $EE    ; attract/demo countdown (???)
 START_HELD = $EF    ; start-button held counter (???)
 KEY_LAST = $F3    ; last key seen
 GUN_HEAT = $F6    ; weapon/ammo counter (???)
-MISSILE_CNT = $F7    ; special-weapon charge; smoke pickup set this =$FF (???)
+MISSILE_CNT = $F7    ; active special-weapon charge: $FF full on pickup, dec per
+                     ;   use ($FF->$EC seen dropping "smoke"). (???: name may be smoke)
 PANEL_X = $F8    ; panel draw column (???)
 SMOKE_CNT = $F9    ; smoke count (???)
 ROAD_PHASE = $FA    ; road lane phase
@@ -1040,6 +1082,9 @@ L84D2:
 
 ; -----------------------------------------------------------------------
 ; Bottom-of-frame path of the IRQ: advance scroll, step road-segment tables.
+; The per-segment template row (SCROLL_SRC, from OBJ_ADDR at L85B7) defines the
+; whole road row incl. its MARGIN tiles - grass on land, water tiles ($06-$13)
+; on the bridge/water segments - so water is part of the scrolling road map.
 IRQ_BOTTOM_SCROLL:
     lda #$00
     sta VIC_BORDER
@@ -3173,7 +3218,10 @@ LA36E:
     rts
 
 ; -----------------------------------------------------------------------
-; Blit a multi-character object (car / weapons van / boat) into the screen.
+; Blit a multi-character object (car / weapons van / boat / smoke plume) into
+; the scrolling $7800 screen buffer + colour RAM (never the ROM/road template),
+; so blitted content becomes transient MAP tiles that scroll with the road.
+; The BLIT_FLAGS high-bit path (LA408+) widens the shape row-by-row = smoke plume.
 DRAW_OBJECT_TILES:
     ldx BLIT_ROWS
     bne LA380
@@ -3355,6 +3403,9 @@ LA472:
 
 ; -----------------------------------------------------------------------
 ; Per-frame weapon / special-vehicle update (weapons van, smoke/missile fx).
+; Smoke: decrements the $F7 charge and blits the plume tiles ($AD/$10/$AE, edge
+; variants $B0-$B6) from ROM ~$A538-$A567 (STREAM_PTR) into the $7800 road buffer
+; via DRAW_OBJECT_TILES, colour $09; blit col/row from STATE_4DB9 / STATE_4DC1.
 UPDATE_WEAPONS:
     lda BLIT_ROWS
     bne LA493

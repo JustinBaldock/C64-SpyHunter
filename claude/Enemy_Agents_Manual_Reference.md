@@ -43,23 +43,30 @@ missed hit, it may be a side effect of the player repeatedly attempting to **ram
 snapshot, rather than anything shooting-related. Still not proven from one snapshot, but far more
 plausible than the earlier guesses.
 
-## Not yet mapped: which `OBJ_TYPE` byte is which enemy
+## `OBJ_TYPE` byte mapping - partial progress
 
-Across all snapshots analysed this session, these `OBJ_TYPE` values have been seen on non-hero,
-non-empty object slots: `$05, $06, $0C, $0D, $0E, $13, $14, $16` - more distinct values than the
-6 named enemies, so some are likely ordinary background traffic rather than one of the named
-agents (the manual doesn't name a "generic car" but real Spy Hunter has ordinary non-hostile
-traffic too). `$05` in particular appears very consistently across many otherwise-unremarkable
-driving snapshots, which fits it being ordinary traffic rather than a named threat.
+A later batch of user-named snapshots (`helicopter-enemy.vsf`, `text-bridgeout.vsf`,
+`respawn-boat.vsf`, `level-ice.vsf`, `water-ice-area.vsf`, etc.) made real progress here, mainly
+by spotting a **locomotion-class flag** distinct from the boat-mode flag already documented
+(`OBJ_TBL63/6B/73` all `$02`): a slot with all three of `OBJ_TBL63/6B/73 = $FF` (not `$00`, not
+`$02`) shows up specifically paired with `OBJ_TYPE=$08`:
 
-No snapshot has yet been captured at the exact moment of a confirmed miss against a *specific,
-visually-identified* enemy, so none of these byte values can be confidently assigned to Road Lord/
-Switch Blade/etc. yet. If a future snapshot is captured with the enemy on-screen clearly
-identified (by appearance) at the moment of an interaction, that would pin one value definitively
-and likely unlock the rest via elimination (weapon type, boat-vs-road behaviour, scoring on
-destruction via `TALLY_SCORE_EVENTS`/`POINTS_TBL_LO`/`POINTS_TBL_HI` could also help - the 150/
-500/500/700-point tiers are distinct enough to potentially cross-reference against
-`disassembly/spyhunter.asm`'s scoring tables in a later session).
+| `OBJ_TYPE` | Evidence | Candidate |
+|---|---|---|
+| **`$08`** | `TBL63/6B/73 = $FF/$FF/$FF` (an "airborne" locomotion flag, distinct from both ordinary `$00/$00/$00` and boat `$02/$02/$02`) in BOTH `helicopter-enemy.vsf` and `text-bridgeout.vsf` - two independent snapshots, same unusual signature | **The Copter (Mad Bomber)** - the only aerial enemy, so a dedicated locomotion-class flag distinguishing it from ground/water traffic makes sense |
+| **`$07`** | In `helicopter-enemy.vsf`, slot 1 sits immediately next to the `$08`/airborne slot 0 (screen position one row apart, same column) | Candidate: a bomb the Copter just dropped, given the manual's "drops bombs onto the Spy Car" - not confirmed, could instead be an ordinary nearby vehicle |
+| **`$13`** | Appears **three times simultaneously** in `water-ice-area.vsf` (slots 2/4/5, all boat-flagged) plus repeatedly elsewhere (`water-enemyboat`, `exit-water`/dock) | A boat enemy type that can spawn multiple instances at once - candidate Barrel Dumper or Doctor Torpedo (not yet distinguished from each other) |
+| **`$18`, `$19`** | New, adjacent, both boat-flagged, only in `respawn-boat.vsf` (slots 0/1, right next to each other on screen) | Candidate: a two-part hero-boat respawn animation (splash + boat), by analogy with the weapons van's dedicated `$03` state - since the filename implies this is the PLAYER's boat reappearing, not a new enemy |
+| `$05, $06, $0C, $0D, $0E, $14, $16` | Seen across many otherwise-unremarkable driving snapshots | Still most consistent with ordinary background traffic rather than named agents - `$05` especially, given how often it recurs |
+
+None of this is definitive - it's correlation across a handful of snapshots, not a traced
+collision-handler read. But `$08` = The Copter now has two independent, mutually-reinforcing data
+points (same unusual flag pattern, different snapshots), which is a meaningfully stronger claim
+than a single-snapshot guess. Still open: the Road Lord, Switch Blade, and Enforcer haven't been
+pinned to a specific byte value at all yet - none of the snapshots so far capture a moment where
+one of those three is both on-screen and visually unambiguous, and scoring
+(`TALLY_SCORE_EVENTS`/`POINTS_TBL_LO`/`POINTS_TBL_HI`) hasn't been cross-referenced against a
+captured kill moment either.
 
 ## Scoring (complete, from the manual)
 

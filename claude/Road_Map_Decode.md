@@ -191,6 +191,12 @@ This confirms the full scripted chain end-to-end: `... $08/$09/$0A/$0B/$0C(bridg
 $14 further round the $12/$13 loop) -> [branch] -> $0B (feature $0F, broken-bridge return) ->
 plain road ...`
 
+Segment `$13` (the repeating water-loop's fork point) has **two** exits, both confirmed by
+snapshots: `main` loops back to `$12` for another lap; `branch` exits to segment `$14`
+(`spyhunter-exit-water-dock-building-and-truck.vsf`, seg `$14`, feature `$0F`, prev `$15`) — a
+second "return to road" on-ramp, opening (like segment `$0B`) on feature `$0F`. See
+`claude/Dock_Exit_Notes.md`.
+
 ## Next steps
 
 * Feature `$10`'s exact meaning (segment `$08`) — no direct `CMP` site found yet.

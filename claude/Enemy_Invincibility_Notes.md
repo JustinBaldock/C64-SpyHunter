@@ -28,6 +28,24 @@ consistent with plain driving) marks any *specific* enemy slot as flagged invinc
 `TBLBB` are just screen column/row (per `claude/Weapons_Truck_Notes.md`) and vary only with
 on-screen position.
 
+**Dispatch-table corroboration:** `HERO_STATE` feeds `OBJINIT_PARAM_TBL` (`$8B3F`, indexed by
+`TYPE*4`) to pick the object's move/draw vectors. Reading that table from the ROM directly:
+
+```
+type $00: move=$9A8E draw=$90AA
+type $01: move=$9A8E draw=$90AA
+type $02: move=$9A8E draw=$90AA
+type $03: move=$9A8E draw=$90AA   (weapons van)
+type $11: move=$9B02 draw=$95BE   <- different handler entirely
+```
+
+`$00`/`$01`/`$02`/`$03` (all previously-seen hero states — `$02` newly confirmed in
+`claude/Dock_Exit_Notes.md`) share one move/draw handler, but `$11` dispatches to a **distinct**
+one. That's supporting evidence — not proof — that `$11` is a genuinely different hero sub-state
+with its own behaviour, not just a coincidental byte value. Still doesn't explain *why* an enemy
+went unshootable, since the dispatch table only governs the hero object's own move/draw code, not
+hit-detection against other slots.
+
 ## What's NOT confirmed
 
 - Which enemy (if any specific one) was the unshootable one — no per-slot "invincible" bit was

@@ -16,6 +16,88 @@
 ;   None of the renaming changes a single assembled byte.
 ;
 ; -----------------------------------------------------------------------------
+; 6502 PRIMER  (for readers who know programming but not assembly)
+;   This whole program is machine code for the 6502 CPU. There's no compiler:
+;   every line below is either one CPU instruction or one byte of raw data.
+;   If you already know 6502, skip this section - everything past here assumes
+;   it. Otherwise, keep this as your cheat sheet; later comments lean on it
+;   instead of re-explaining these terms every time.
+;
+;   REGISTERS - the CPU has just a handful of tiny (8-bit, 0-255) storage
+;   slots built into the chip itself (nothing like a modern CPU's dozens):
+;     A (accumulator) - the main "working" value; almost every calculation
+;                        goes through A (think of it as the one variable
+;                        every arithmetic/logic op implicitly uses).
+;     X, Y             - general-purpose "index" registers. Mainly used to
+;                         walk through arrays: e.g. "LDA TABLE,X" loads
+;                         TABLE[X]. Also used as small loop counters.
+;     S (stack ptr)    - tracks the top of the hardware stack (see JSR/RTS
+;                         below). Rarely touched directly.
+;     P (status/flags) - one bit per condition, set automatically by most
+;                         instructions. The ones you'll see checked constantly:
+;                           Z (zero)     - set when a result was 0
+;                           C (carry)    - set on unsigned overflow/borrow,
+;                                          and doubles as the "extra bit" for
+;                                          shifts and multi-byte add/subtract
+;                           N (negative) - set when bit 7 of the result is 1
+;                     There is no separate program-counter register comment
+;                     needed here - just know it's what advances through the
+;                     code automatically; JMP/JSR/branches change it directly.
+;
+;   MEMORY & ADDRESSING - a 6502 only ever reads/writes 8 bits (1 byte) at a
+;   time, and addresses are 16-bit (0000-$FFFF, i.e. 0-65535), so a 16-bit
+;   address is always stored/loaded as TWO bytes: a low byte and a high byte
+;   (hence all the "_LO"/"_HI" equate pairs below - together they form one
+;   address, e.g. SCROLL_SRC/SCROLL_SRC_HI). You'll see several ADDRESSING
+;   MODES, distinguished by syntax:
+;     lda #$05        - IMMEDIATE: load the literal number 5 into A.
+;     lda $44          - ABSOLUTE/ZERO PAGE: load the BYTE STORED AT address
+;                        $44 into A (i.e. treat $44 as a variable, not a value).
+;     lda TABLE,x      - ABSOLUTE,X / ZERO PAGE,X: load TABLE[x] - X is added
+;                        to the address first. (,y works the same way.)
+;     lda (PTR),y      - INDIRECT INDEXED: PTR is a zero-page variable that
+;                        holds a 16-bit address (2 bytes: PTR/PTR+1); read
+;                        the address it points to, add y, and load THAT byte.
+;                        This is the 6502's version of a pointer/array access
+;                        and shows up constantly for walking ROM data tables.
+;     jmp (VEC)        - similar, but jumps through a stored address - the
+;                        6502's version of a function pointer/vtable.
+;   ZERO PAGE ($0000-$00FF) is just the first 256 bytes of RAM, but
+;   instructions that address it are shorter and faster than normal absolute
+;   addressing - so this program (like most 6502 code) keeps its most
+;   frequently-used variables and pointers there. When you see a short
+;   zero-page equate (e.g. ROAD_FEATURE = $44) being read/written constantly,
+;   that's why: it's being used as a fast global variable.
+;
+;   THE STACK & SUBROUTINES - JSR (jump to subroutine) pushes the return
+;   address onto the hardware stack (which lives at $0100-$01FF) and jumps;
+;   RTS pops that address back off and returns - this program's version of a
+;   function call/return. PHA/PLA push and pop A onto/off the same stack (a
+;   scratch save-and-restore, since there are no other spare registers).
+;
+;   COMMON INSTRUCTIONS you'll see everywhere (full mnemonic = operation):
+;     LDA/LDX/LDY  load A/X/Y            STA/STX/STY  store A/X/Y to memory
+;     TAX/TXA/TAY/TYA  copy between A and X/Y (transfer)
+;     INC/DEC  add/subtract 1 from a memory byte;  INX/DEX/INY/DEY  same for X/Y
+;     CMP/CPX/CPY  compare (subtract without storing the result, just set flags)
+;     AND/ORA/EOR  bitwise AND / OR / XOR;  ASL/LSR  shift left/right (x2, /2)
+;     BIT  test bits against a memory value without changing A (flags only)
+;     SEI/CLI  disable/enable interrupts;  SEC/CLC  set/clear the carry flag
+;   BRANCHES test one flag and jump only if it matches, otherwise fall through
+;   to the next line (this is how every if/while loop in this file is built):
+;     BEQ/BNE  branch if Z set/clear (i.e. "if equal" / "if not equal", after
+;              a CMP)                BCS/BCC  branch if carry set/clear
+;     BPL/BMI  branch if N clear/set (i.e. "if positive" / "if negative" -
+;              often used as a cheap "is bit 7 set?" test on a byte, since N
+;              just mirrors bit 7 of the last loaded/computed value)
+;
+;   HEX & BCD - a leading "$" means hexadecimal (base 16), e.g. $44 = 68
+;   decimal. Scores/timers in this game are BCD (binary-coded decimal): each
+;   byte holds two decimal digits, one per nibble (so BCD byte $19 means the
+;   decimal number "19", not 25) - that's why score/timer math in this file
+;   uses SED (decimal mode) instead of plain binary ADC/SBC.
+;
+; -----------------------------------------------------------------------------
 ; SNAPSHOT-VERIFIED FINDINGS  (from live VICE .vsf snapshots)
 ;   Live state read from snapshots and cross-checked with the labels below.
 ;   VICE C64MEM module stores 4 bytes (pport.data,dir,exrom,game) before the
@@ -145,6 +227,19 @@
 ;        plus a matching 4-cell colour-RAM block - most likely what schedules the
 ;        extra multiplexed hazard/enemy-boat sprites at the river's boundaries. This
 ;        resolves the last of the four $11/$13/$14/$15 scripted-trigger codes.
+;     8. DOCK / EXIT SCENE (snapshot "exit water, dock building and truck"): segment
+;        $13's BRANCH exit (taken after the $15 trigger) lands on segment $14, which
+;        also opens on feature $0F - confirming $0F is a general "back on solid road"
+;        marker reused at more than one water-exit point, not unique to segment $0B.
+;        HERO_STATE=$02 (new value, ANIM=$08) shares its OBJINIT_PARAM_TBL move/draw
+;        dispatch entry with states $00/$01/$03 (all move=$9A8E draw=$90AA) - these
+;        low hero-state values look like one small state machine sharing generic
+;        object code, with actual behaviour driven by direct HERO_STATE checks
+;        elsewhere (as in UPDATE_SCENE_SELECT). By contrast HERO_STATE=$11 (the
+;        bridge/enemy-unshootable snapshot) dispatches to a DIFFERENT entry
+;        (move=$9B02 draw=$95BE) - supporting evidence (not proof) that $11 is a
+;        distinct sub-state, relevant to the still-open enemy-unshootable question.
+;        See claude/Dock_Exit_Notes.md and claude/Enemy_Invincibility_Notes.md.
 ;
 ; RUNTIME MEMORY MAP
 ;   $00-$01 6510 I/O port ($01=$05 run) ; $02-$04 high score BCD
@@ -159,8 +254,14 @@
 .setcpu "6502"
 ; =============================================================================
 ; SYMBOL EQUATES  (zero page, $4Dxx game state, hardware registers)
+;   "EQUATES" just means named constants (like #define in C) - "NAME = $XX"
+;   gives a number a readable name everywhere below; it doesn't reserve or
+;   allocate anything by itself. Grouped here by what part of the machine
+;   they refer to; see the "6502 PRIMER" above for what zero page/BCD/etc mean.
 ; =============================================================================
-COLOR_RAM = $D800    ; colour RAM base
+COLOR_RAM = $D800    ; colour RAM base (a hardware address, used as a base for
+                     ;   indexed writes like "COLOR_RAM+n,y" further down)
+; --- Zero page ($00-$FF): the program's fast "global variables" and pointers.
 ZP_00 = $00    ; 6510 data-direction reg ($2F)
 CPU_PORT = $01    ; 6510 port: RAM/ROM banking ($01)
 HISCORE_LO = $02    ; high score, 3-byte BCD (lo)
@@ -307,6 +408,11 @@ FLAG_FB = $FB    ; flag (???)
 FLAG_FC = $FC    ; flag (???)
 BLIT_FLAGS = $FD    ; blit mode flags
 FLAG_FF = $FF    ; flag (???)
+; --- RAM code/dispatch area ($2800+): a small routine + several "vectors"
+; (RAM words holding a target address) that the game overwrites at runtime
+; and then jumps through indirectly, e.g. "jmp (VEC_STATE)" - the 6502
+; equivalent of a function pointer, used here to switch behaviour (which
+; state-handler/move-routine/scroll-routine runs) without a big branch table.
 SPEEDCODE = $2802    ; RAM speed routine entry ($2802)
 VEC_OBJMOVE = $2893    ; self-mod object-move vector
 VEC_OBJMOVE_HI = $2894
@@ -316,6 +422,9 @@ VEC_SCROLL = $2897    ; road-scroll dispatch vector
 VEC_SCROLL_HI = $2898
 ROWADDR_LO = $2899    ; screen row-address table lo
 ROWADDR_HI = $289A    ; screen row-address table hi
+; --- $4Dxx game-state variables: ordinary RAM (not zero page - these are
+; addressed the normal, slightly slower way), used for less time-critical
+; state: score/lives/timer, the moving-object tables, sprite multiplexing.
 FRAME_FLAG = $4D00    ; IRQ frame counter (waited on)
 GAME_TIME_LO = $4D01    ; game timer BCD lo (on-screen timer)
 GAME_TIME_HI = $4D02    ; game timer BCD hi
@@ -364,6 +473,10 @@ STATE_4DC1 = $4DC1
 SCORE_EVENT = $4DC3    ; queued score events
 STAT_CTR = $4DC4    ; statistic counters
 STATE_4DCB = $4DCB
+; --- VIC-II (video chip) hardware registers, memory-mapped at $D000-$D02E.
+; Writing these directly controls the screen: sprite positions/colours,
+; scroll position, screen/charset memory pointers, border/background colour,
+; and the raster-line interrupt used throughout the IRQ code below.
 VIC_SPR0X = $D000    ; sprite 0 X (VIC reg base)
 VIC_CR1 = $D011    ; control reg 1 (Y-scroll/rows/RSEL)
 VIC_RASTER = $D012    ; raster line / compare
@@ -379,6 +492,9 @@ VIC_BG1 = $D022    ; background colour 1
 VIC_BG2 = $D023    ; background colour 2
 VIC_SPRMC0 = $D025    ; sprite multicolour 0
 VIC_SPRMC1 = $D026    ; sprite multicolour 1
+; --- SID (sound chip) hardware registers, $D400+: 3 independent voices, each
+; with frequency, waveform/gate control, and an ADSR (attack/decay/sustain/
+; release) envelope, plus one shared filter/volume register.
 SID_V1_FLO = $D400    ; voice1 freq lo
 SID_V1_FHI = $D401    ; voice1 freq hi
 SID_V1_CTRL = $D404    ; voice1 control
@@ -387,6 +503,9 @@ SID_V1_SR = $D406    ; voice1 sustain/release
 SID_V2_CTRL = $D40B    ; voice2 control
 SID_V3_CTRL = $D412    ; voice3 control
 SID_VOL = $D418    ; master volume/filter
+; --- CIA hardware registers, $DC00+/$DD00+: two "Complex Interface Adapter"
+; chips handle the keyboard matrix, both joystick ports, and (via CIA2 port A)
+; which 16 KB "bank" of RAM the VIC chip reads its screen/sprite data from.
 CIA1_PRA = $DC00    ; CIA1 port A (keyboard cols/joy2)
 CIA1_PRB = $DC01    ; CIA1 port B (keyboard rows/joy1)
 CIA1_DDRA = $DC02    ; CIA1 data-dir A
@@ -394,6 +513,10 @@ CIA1_ICR = $DC0D    ; CIA1 interrupt ctrl
 CIA2_PRA = $DD00    ; CIA2 port A (VIC bank select)
 CIA2_DDRA = $DD02    ; CIA2 data-dir A
 CIA2_ICR = $DD0D    ; CIA2 interrupt ctrl
+; --- CPU vectors, $FFFA-$FFFF: fixed hardware addresses the 6502 always
+; reads on reset/IRQ/NMI to find out where to jump. This program overwrites
+; them (they sit in RAM here, not ROM) to point NMI/RESET at $8027 and IRQ at
+; $8402, effectively replacing the machine's normal KERNAL startup entirely.
 VEC_NMI = $FFFA    ; CPU NMI vector
 VEC_NMI_HI = $FFFB
 VEC_RESET = $FFFC    ; CPU RESET vector
@@ -403,6 +526,10 @@ VEC_IRQ_HI = $FFFF
 
 ; =============================================================================
 ; DATA / TABLE ADDRESSES  (ROM tables + RAM screen/charset buffers)
+;   These aren't CPU/hardware registers - just named addresses of data
+;   structures inside this ROM image (screen buffers, tile-graphics tables,
+;   the road/level tables, sound data), given names so the code below reads
+;   as "look up ROAD_SEG_TBL" instead of "look up $AC17".
 ; =============================================================================
 PANEL_SCR0 = $6798
 PANEL_SCR1 = $67C0
@@ -479,173 +606,211 @@ SND_SEQPTR_HI = $BD18
     .byte $33,$20,$42,$41,$4C,$4C,$59
 
 ; -----------------------------------------------------------------------
-; RESET / cold + warm entry ($8027).
+; RESET / cold + warm entry ($8027). This is where the CPU starts (see the
+; autostart header above) - the 6502 equivalent of main().
 RESET:
-    sei
-    cld
+    sei                 ; disable IRQs while we set things up
+    cld                 ; make sure we start in normal (not BCD) arithmetic mode
     lda #$7F
-    sta CIA2_ICR
-    sta CIA1_ICR
-    lda CIA2_ICR
-    lda CIA1_ICR
+    sta CIA2_ICR        ; mask (disable) all CIA2 interrupt sources...
+    sta CIA1_ICR        ; ...and all CIA1 interrupt sources
+    lda CIA2_ICR        ; reading each ICR acknowledges/clears any pending IRQ
+    lda CIA1_ICR        ; (standard C64 startup: guarantees a clean interrupt state)
     ldx #$FF
-    txs
-    jsr INIT_SYSTEM
+    txs                 ; reset the stack pointer to the top of the stack page
+    jsr INIT_SYSTEM     ; set up VIC/charset/RAM (see below), then fall through
 
 ; -----------------------------------------------------------------------
-; Top-level game state loop.
+; Top-level game-state loop: title screen -> menu -> play -> (loop). Each of
+; these is only ever reached via a `jmp`, never falls through from above, so
+; think of them as the three "screens" the game cycles between.
 MAIN_RUN_ATTRACT:
-    jsr ATTRACT_TITLE
+    jsr ATTRACT_TITLE   ; show the title screen until a key/coin advances it
 
 MAIN_RUN_MENU:
-    jsr ATTRACT_MENU
+    jsr ATTRACT_MENU    ; show the menu (player count etc.) until START is hit
 
 MAIN_RUN_PLAY:
-    jsr INIT_PLAY_STATE
+    jsr INIT_PLAY_STATE     ; reset score/lives/road/etc. for a fresh game
     jsr MUSIC_START_THEME
 
 ; -----------------------------------------------------------------------
-; Per-frame master loop.
+; Per-frame master loop: everything the game does once per video frame while
+; actually playing. GAME_DISPATCH below then hands off to whatever the
+; current GAME_STATE's handler is (attract/play/etc.), and the rest of this
+; loop is really the "what happens after that dispatch" bookkeeping: deciding
+; whether to return to attract mode, restart the menu, or start a new game.
 GAME_LOOP:
-    jsr WAIT_FRAME_TIMER
-    jsr PROCESS_OBJECTS
-    jsr UPDATE_SCENE_SELECT
-    jsr UPDATE_WEAPONS
-    jsr DRAW_STATUS_PANEL
-    jsr TALLY_SCORE_EVENTS
-    jsr HANDLE_PAUSE_KEYS
-    jsr GAME_DISPATCH
+    jsr WAIT_FRAME_TIMER    ; block until the IRQ signals a new frame started
+    jsr PROCESS_OBJECTS     ; move every car/enemy/hazard object one step
+    jsr UPDATE_SCENE_SELECT ; pick road difficulty/section for this frame
+    jsr UPDATE_WEAPONS      ; fire/animate the player's current weapon
+    jsr DRAW_STATUS_PANEL   ; redraw score/timer/lives/weapon icons
+    jsr TALLY_SCORE_EVENTS  ; apply any points queued up this frame
+    jsr HANDLE_PAUSE_KEYS   ; check for the pause/mute keys
+    jsr GAME_DISPATCH       ; run the current game-state's own handler
     lda GAME_STATE
-    bne L808C
+    bne ATTRACT_LOOP_CHECK  ; GAME_STATE=0 means "not actively playing yet" -
+                            ; only then do we look for a coin/start press below
     lda GAME_TIME_HI
     cmp #$08
-    bcc L80AA
+    bcc GAMEOVER_WAIT_INPUT ; timer already low -> skip straight to the
+                            ; "game over, wait for input" handling further down
     lda #$FF
-    cmp CIA1_PRB
-    bne L807D
+    cmp CIA1_PRB            ; CIA ports read $FF when nothing is pressed
+    bne START_OR_SELECT_PRESSED   ; (joystick/keys pull individual bits LOW)
     cmp CIA1_PRA
-    bne L807D
+    bne START_OR_SELECT_PRESSED
     lda START_HELD
-    beq L808C
+    beq ATTRACT_LOOP_CHECK  ; nothing pressed and nothing held -> just loop
 
-L807D:
+; A key/joystick input was seen (or START_HELD was already counting) - track
+; how long it's been held, and once a player count is chosen, start playing.
+START_OR_SELECT_PRESSED:
     inc START_HELD
     lda NUM_PLAYERS
-    beq L80D5
+    beq GOTO_PLAYER_SELECT  ; no player count chosen yet -> go pick one
     lda TWO_PLAYER
-    beq L80D5
-    sta GAME_STATE
+    beq GOTO_PLAYER_SELECT  ; (???) same check again on the 2-player flag
+    sta GAME_STATE          ; otherwise commit to playing (A = TWO_PLAYER here)
 
-L808C:
+; Reached every frame once GAME_STATE is nonzero (i.e. once actually playing).
+; Its job is to notice "game over" and, after a short wait, either restart
+; the game (if the player presses something) or fall back to attract mode.
+ATTRACT_LOOP_CHECK:
     lda DEMO_TIMER
-    bne L80D5
+    bne GOTO_PLAYER_SELECT  ; demo/attract countdown still running
     lda START_HELD
-    bne L80CF
+    bne BEGIN_PLAY          ; START is being held down -> (re)start immediately
     lda LIVES
-    bpl L80A7
+    bpl LOOP_TO_GAME        ; LIVES has its top bit set only at $FF ("game
+                            ; over" sentinel, per the header notes) - if it's
+                            ; not $FF, there's nothing special to do this frame
     lda ANIM_STATE
     cmp #$15
-    bcc L80A7
-    cmp #$18
-    bcs L80A7
+    bcc LOOP_TO_GAME        ; only continue while ANIM_STATE is in the small
+    cmp #$18                ; window $15-$17 - the game-over animation is
+    bcs LOOP_TO_GAME        ; presumably playing during that window
     lda FLAG_A1
-    beq L80AA
+    beq GAMEOVER_WAIT_INPUT ; (???) some extra one-shot guard flag
 
-L80A7:
+LOOP_TO_GAME:
     jmp GAME_LOOP
 
-L80AA:
+; Game over animation has finished: clear the score panel, award any final
+; points, then give the player a short window (POLL_INPUT_FRAME, looped 6
+; times) to press something before falling back to the attract/title screen.
+GAMEOVER_WAIT_INPUT:
     jsr CLEAR_PANEL
     ldy #$00
-    jsr ADD_SCORE
+    jsr ADD_SCORE            ; (Y=0: no extra points, just runs the score-tally
+                              ;  side effects, e.g. updating the high score)
     inc FX_TIMER0
     jsr DELAY_FRAMES
     lda #$06
-    sta ZTMP_08
+    sta ZTMP_08              ; loop counter: wait up to 6 polls for input
 
-L80BB:
+GAMEOVER_WAIT_LOOP:
     jsr POLL_INPUT_FRAME
-    bne L80CF
+    bne BEGIN_PLAY            ; input seen -> go straight back into play
     dec ZTMP_08
-    bne L80BB
-    sta GAME_STATE
+    bne GAMEOVER_WAIT_LOOP
+    sta GAME_STATE             ; no input within the wait: A is 0 here (from
+                                ; POLL_INPUT_FRAME), so this resets GAME_STATE
     jsr RESET_ROAD_INDEX
     inc SCENE_IDX
-    jmp MAIN_RUN_ATTRACT
+    jmp MAIN_RUN_ATTRACT        ; ...and drop back to the attract/title screen
 
-L80CF:
+BEGIN_PLAY:
     jsr RESET_ROAD_INDEX
-    jmp MAIN_RUN_PLAY
+    jmp MAIN_RUN_PLAY            ; start (or restart) a game from the top
 
-L80D5:
+GOTO_PLAYER_SELECT:
     lda #$01
     sta GAME_STATE
     jsr RESET_ROAD_INDEX_ALT
     inc SCENE_IDX
-    jmp MAIN_RUN_MENU
+    jmp MAIN_RUN_MENU             ; go show the player-count menu
 
 ; -----------------------------------------------------------------------
-; Enter the current game-state handler via VEC_STATE ($2895).
+; Enter the current game-state handler via VEC_STATE ($2895). VEC_STATE is
+; one of the "RAM vector" function pointers from the equates section - some
+; other routine has already written the target address into it, and this
+; just jumps through it. So GAME_DISPATCH itself never changes; only where
+; it sends control does.
 GAME_DISPATCH:
     jmp (VEC_STATE)
 
 ; -----------------------------------------------------------------------
-; One-time system init.
+; One-time system init, called once from RESET: sets memory banking, clears
+; RAM, builds the game's custom character sets from ROM font data, sets up
+; the VIC display and the CPU's interrupt vectors, then returns with
+; interrupts re-enabled (CLI) so the IRQ-driven game loop can start.
 INIT_SYSTEM:
     lda #$80
     tay
     ldx #$40
-    jsr COPY_PAGES
+    jsr COPY_PAGES      ; copy $40 (64) pages - i.e. 16 KB
     lda #$05
-    sta CPU_PORT
+    sta CPU_PORT        ; memory config $05: RAM at $A000/$E000, I/O at $D000
+                        ;   (see the header's "memory configuration" notes)
     lda #$2F
-    sta ZP_00
+    sta ZP_00           ; data-direction register: which CPU_PORT bits are outputs
     ldx #$00
     txa
-    stx VIC_CR1
-    stx VIC_IMR
-    stx VIC_SPR_ENA
+    stx VIC_CR1         ; screen off while we set everything up
+    stx VIC_IMR         ; disable all VIC interrupt sources
+    stx VIC_SPR_ENA     ; no hardware sprites visible yet
     stx VIC_SPR_BGPRI
-    dex
-    stx VIC_IRR
-    dex
+    dex                 ; x = $FF
+    stx VIC_IRR         ; writing $FF acknowledges/clears any pending VIC IRQs
+    dex                 ; x = $FE
 
-L8109:
+; Zero out zero page RAM (addresses CPU_PORT+1 .. CPU_PORT+$FE, i.e. $02-$FF -
+; A is still 0 from the "txa" above). $00/$01 are left alone since they're
+; the CPU's own port registers, just configured above.
+CLEAR_ZEROPAGE_LOOP:
     sta CPU_PORT,x
     dex
-    bne L8109
+    bne CLEAR_ZEROPAGE_LOOP
     jsr DRAW_PLAYFIELD_FRAME
     jsr UNPACK_MAP_DATA
     lda #$00
     ldy #$4D
     ldx #$33
-    jsr FILL_PAGES
+    jsr FILL_PAGES      ; zero-fill $33 pages starting at $4D00 (game-state
+                        ;   vars, object tables, sprite/colour buffers)
     lda #$03
-    sta CPU_PORT
+    sta CPU_PORT        ; briefly switch to config $03 (character ROM visible)
+                        ;   to read the real C64 font as source data below
     lda #$00
     sta SRC_PTR
     lda #$D0
-    sta SRC_PTR_HI
+    sta SRC_PTR_HI      ; SRC_PTR = $D000: the character ROM (visible now)
     lda #$01
     sta DST_PTR
     lda #$68
-    sta DST_PTR_HI
+    sta DST_PTR_HI      ; DST_PTR  = $6801
     lda #$09
     sta DST2_PTR
     lda #$68
-    sta DST2_PTR_HI
+    sta DST2_PTR_HI     ; DST2_PTR = $6809
     lda #$40
-    sta ZTMP_0A
+    sta ZTMP_0A         ; outer loop count = $40 (64)
 
-L813D:
+; Build two custom character sets (at DST_PTR/DST2_PTR) out of the stock
+; character ROM, 8 bytes (one character) at a time: PACK_2BITS presumably
+; repacks each 1-bit-per-pixel ROM glyph row into this game's 2-bit-per-pixel
+; multicolour format (exact bit trick not traced - see PACK_2BITS). (???)
+BUILD_CHARSET_OUTER:
     lda #$08
-    sta ZTMP_0B
+    sta ZTMP_0B         ; inner loop count = 8 (one character = 8 rows)
 
-L8141:
+BUILD_CHARSET_INNER:
     ldx #$00
-    lda (SRC_PTR,x)
-    jsr PACK_2BITS
-    ldy ZTMP_09
+    lda (SRC_PTR,x)     ; note: this is (zp,x)-indexed with x=0, i.e. just a
+    jsr PACK_2BITS       ;   plain "load through the pointer" - x is 0 here,
+    ldy ZTMP_09          ;   not walking an array
     jsr PACK_2BITS
     ldx #$00
     tya
@@ -656,56 +821,67 @@ L8141:
     jsr PTR_DST_INC
     jsr PTR_AUX_INC
     dec ZTMP_0B
-    bne L8141
+    bne BUILD_CHARSET_INNER
     lda #$08
-    jsr PTR_DST_ADD
+    jsr PTR_DST_ADD     ; advance DST_PTR/DST2_PTR to the next character
     lda #$08
     jsr PTR_AUX_ADD
     dec ZTMP_0A
-    bne L813D
+    bne BUILD_CHARSET_OUTER
     ldy #$4E
 
-L8173:
+; Copy INIT_CHARS_TBL (a small ROM table of extra ready-made characters)
+; straight into the tail end of the character set just built.
+COPY_INIT_CHARS_LOOP:
     lda INIT_CHARS_TBL,y
     sta (DST_PTR),y
     dey
-    bpl L8173
+    bpl COPY_INIT_CHARS_LOOP
     lda #$05
-    sta CPU_PORT
+    sta CPU_PORT        ; back to normal config $05 (character ROM hidden again)
     lda #$00
     sta DST_PTR
     lda #$70
-    sta DST_PTR_HI
+    sta DST_PTR_HI      ; DST_PTR = $7000: the second (playfield) character set
     lda #$0C
     sta ZTMP_0C
-    jsr BUILD_CHAR_PAIR
+    jsr BUILD_CHAR_PAIR ; build $0C character-pairs of one kind (???: exact
+                        ;   source/shape not traced)
     lda #$1C
     sta ZTMP_0C
     lda #$00
-    jsr BUILD_CHAR_PAIR
+    jsr BUILD_CHAR_PAIR ; then $1C more of another kind
     lda #$3B
     sta ZTMP_0C
 
-L819B:
+; Stream $3B (59) more characters (8 bytes each) straight out of a ROM byte
+; stream via STREAM_NEXT_BYTE - i.e. these characters are stored pre-built in
+; ROM rather than generated, unlike the ones above.
+STREAM_CHARS_OUTER:
     ldy #$00
 
-L819D:
+STREAM_CHARS_INNER:
     jsr STREAM_NEXT_BYTE
     sta (DST_PTR),y
     iny
     cpy #$08
-    bne L819D
+    bne STREAM_CHARS_INNER
     lda #$08
     jsr PTR_DST_ADD
     dec ZTMP_0C
-    bne L819B
+    bne STREAM_CHARS_OUTER
     lda #$0E
     sta ZTMP_0C
     lda #$00
     jsr BUILD_CHAR_PAIR
     ldx #$00
 
-L81BB:
+; Build a third, brighter variant of two of the charsets by shifting every
+; byte left one bit (ASL): CHARSET_A_10/CHARSET_A_E0 -> CHARSET_B_660/
+; CHARSET_B_730. (Multicolour chars use 2 bits/pixel; shifting left changes
+; which colour-pair each pixel selects - a cheap way to get an "alternate
+; palette" copy of the same shapes without hand-drawing new ones.) (???)
+DOUBLE_CHARSET_LOOP:
     lda CHARSET_A_10,x
     asl a
     sta CHARSET_B_660,x
@@ -714,44 +890,48 @@ L81BB:
     sta CHARSET_B_730,x
     inx
     cpx #$D0
-    bne L81BB
+    bne DOUBLE_CHARSET_LOOP
     lda #$00
     sta SRC_PTR
     lda #$78
-    sta SRC_PTR_HI
+    sta SRC_PTR_HI      ; SRC_PTR = $7800: the main scrolling play screen
     ldx #$00
 
-L81D8:
+; Build ROWADDR_LO/HI: a lookup table of the screen address of each text row
+; ($28 = 40 bytes apart, i.e. one 40-column row), so other code can jump
+; straight to "the address of row N" instead of recalculating it each time.
+BUILD_ROWADDR_LOOP:
     lda SRC_PTR
     sta ROWADDR_LO,x
     inx
     lda SRC_PTR_HI
-    sta ROWADDR_LO,x
-    inx
+    sta ROWADDR_LO,x    ; (note: this stores into the same ROWADDR_LO array,
+    inx                 ;  not ROWADDR_HI - the two interleave lo/hi/lo/hi as
+                        ;  one table, walked by a single incrementing index)
     lda #$28
     jsr PTR_SRC_ADD
     cpx #$32
-    bne L81D8
+    bne BUILD_ROWADDR_LOOP
     jsr UNPACK_CHARSET
     ldx #$00
     stx BLIT_ROWS
     inx
-    stx VIC_IRR
+    stx VIC_IRR         ; x=1: acknowledge/enable-mask tidy-up
     stx VIC_IMR
-    stx WEAPON_STATE
+    stx WEAPON_STATE    ; start the player with weapon state 1 (machine guns)
     inx
-    stx CIA2_PRA
+    stx CIA2_PRA        ; x=2: CIA2 port A bit 1 -> selects VIC bank 1 ($4000+)
     inx
-    stx CIA2_DDRA
+    stx CIA2_DDRA       ; x=3: CIA2 port A data-direction
     stx STATE_4D1D
     stx STATE_4D16
     lda #$18
-    sta VIC_CR2
+    sta VIC_CR2         ; multicolour character mode, 40-column display
     lda #$27
-    sta VEC_NMI
-    lda #$80
-    sta VEC_NMI_HI
-    lda #$27
+    sta VEC_NMI         ; install our own NMI/RESET/IRQ vectors, replacing
+    lda #$80            ;   the KERNAL's - from here on this program owns the
+    sta VEC_NMI_HI      ;   whole machine (NMI/RESET both -> $8027 = RESET,
+    lda #$27            ;   IRQ -> $8402 = IRQ_MAIN)
     sta VEC_RESET
     lda #$80
     sta VEC_RESET_HI
@@ -760,19 +940,20 @@ L81D8:
     lda #$84
     sta VEC_IRQ_HI
     lda #$EA
-    sta SPLIT_RASTER
+    sta SPLIT_RASTER    ; first raster-interrupt compare line
     lda #$17
     sta VSCROLL_POS
     lda #$1B
-    sta D011_SHADOW
+    sta D011_SHADOW     ; screen on, 25 rows, no Y-scroll offset yet
     lda #$9A
-    sta D018_SHADOW
+    sta D018_SHADOW     ; initial screen/charset pointer (title screen buffer)
     lda #$FC
     sta D018_ALT
     lda #$F1
-    sta VIC_RASTER
+    sta VIC_RASTER      ; arm the raster compare for line $F1 - the IRQ fires
+                        ;   here first (see IRQ_MAIN/IRQ_BOTTOM_SCROLL below)
     jsr RESET_SCROLL_VARS
-    cli
+    cli                 ; interrupts back on - the IRQ-driven game can now run
     rts
 ; -----------------------------------------------------------------------
 ; PANEL_LABELS_TBL: 20 screen char-codes drawn to the status panel by ATTRACT_TITLE.
@@ -780,26 +961,33 @@ L81D8:
     .byte $62,$52,$06,$50
 
 ; -----------------------------------------------------------------------
-; Draw the attract/title status line and poll for input.
+; Draw the attract/title status line and poll for input once. This runs
+; exactly once per pass through the boot-order chain (RESET falls into
+; MAIN_RUN_ATTRACT -> here -> MAIN_RUN_MENU -> ATTRACT_MENU -> MAIN_RUN_PLAY,
+; all called in a straight line, see the top-level game-state loop above) -
+; it does NOT itself sit in a loop waiting for a keypress. The actual
+; per-frame "wait on the title screen" behaviour comes from GAME_LOOP calling
+; GAME_DISPATCH (through VEC_STATE) every frame once play is running; this
+; routine only sets the initial GAME_STATE/SCENE_IDX for that to act on.
 ATTRACT_TITLE:
     jsr RESET_SCREEN_STATE
     jsr DELAY_FRAMES_ALT
     ldx #$00
-    ldy #$13
+    ldy #$13            ; 20 entries in PANEL_LABELS_TBL, indices 19 downto 0
 
-L826B:
+DRAW_TITLE_LABELS_LOOP:
     lda PANEL_LABELS_TBL,y
     jsr PANEL_PUT_CHAR_PAIR
     dey
-    bpl L826B
+    bpl DRAW_TITLE_LABELS_LOOP
     lda #$12
     sta SCENE_IDX
-    jsr POLL_INPUT_FRAME
-    beq L827F
-    inc SCENE_IDX
+    jsr POLL_INPUT_FRAME    ; sample this frame's input once (A = 0 if none)
+    beq TITLE_SET_GAME_STATE
+    inc SCENE_IDX            ; input seen this frame -> bump the scene index
 
-L827F:
-    sta GAME_STATE
+TITLE_SET_GAME_STATE:
+    sta GAME_STATE           ; GAME_STATE = whatever POLL_INPUT_FRAME returned
     rts
 ; -----------------------------------------------------------------------
 ; MENU_MSG_TBL / MENU_MSG_TBL_B: char-codes for the player-select / demo screen.
@@ -807,40 +995,49 @@ L827F:
     .byte $0A,$24,$1E,$06,$26,$40,$10,$0E,$12,$10
 
 ; -----------------------------------------------------------------------
-; Player-select / demo screen.
+; Player-select / demo screen: like ATTRACT_TITLE, this runs once per pass
+; through the boot-order chain, not in an internal wait-loop (see the note
+; above ATTRACT_TITLE). Two sequential single-poll prompts: first "how many
+; players", then a second "which game/start option" choice. The exact key
+; codes compared against ($1D/$1A/$18/$31) are POLL_INPUT_FRAME's raw
+; decoded-input values - see SCAN_JOY_KEYS/KEYCODE_TBL in a later section for
+; how those are produced; not cross-checked here. (???)
 ATTRACT_MENU:
     jsr RESET_SCREEN_STATE
     lda GAME_STATE
-    beq L8318
+    beq MENU_ABORT      ; GAME_STATE=0 (attract mode) -> nothing to do, bail
     jsr DELAY_FRAMES_ALT
     ldx #$14
-    ldy #$09
+    ldy #$09            ; 10 entries in MENU_MSG_TBL_B
 
-L82AC:
+DRAW_PLAYERS_PROMPT_LOOP:
     lda MENU_MSG_TBL_B,y
     jsr PANEL_PUT_CHAR_PAIR
     dey
-    bpl L82AC
+    bpl DRAW_PLAYERS_PROMPT_LOOP
     jsr DRAW_SCORE
 
-L82B8:
+POLL_PLAYERS_CHOICE:
     jsr POLL_INPUT_FRAME
-    beq L8318
+    beq MENU_ABORT       ; no input this frame -> bail
     ldx #$01
     ldy #$11
     cmp #$1D
-    beq L82CC
-    inx
+    beq PLAYERS_CHOSEN   ; input $1D -> 1 player (X stays 1)
+    inx                  ; X=2
     ldy #$1D
     cmp #$1A
-    bne L82B8
+    bne POLL_PLAYERS_CHOICE  ; not $1A either -> keep polling next frame
 
-L82CC:
-    stx NUM_PLAYERS
+PLAYERS_CHOSEN:
+    stx NUM_PLAYERS      ; NUM_PLAYERS = 1 or 2
     ldx #$12
     lda #$00
 
-L82D3:
+; Clear a block of rows across all 6 play/high-score screen-buffer areas
+; (play buffer x3 + high-score buffer x3, see the SCR_PLAY_*/SCR_HISC_*
+; equates) to erase the "how many players" prompt before the next one.
+CLEAR_MENU_ROWS_LOOP:
     sta SCR_PLAY_0D,y
     sta SCR_PLAY_35,y
     sta SCR_PLAY_5D,y
@@ -849,101 +1046,112 @@ L82D3:
     sta SCR_HISC_5D,y
     dey
     dex
-    bne L82D3
+    bne CLEAR_MENU_ROWS_LOOP
     jsr CLEAR_PANEL
     ldx #$04
-    ldy #$0F
+    ldy #$0F            ; 16 entries in MENU_MSG_TBL
 
-L82F0:
+DRAW_GAME_PROMPT_LOOP:
     lda MENU_MSG_TBL,y
     jsr PANEL_PUT_CHAR_PAIR
     dey
-    bpl L82F0
+    bpl DRAW_GAME_PROMPT_LOOP
 
-L82F9:
+POLL_GAME_CHOICE:
     jsr POLL_INPUT_FRAME
-    beq L8318
+    beq MENU_ABORT
     ldy #$01
     cmp #$18
-    beq L8309
+    beq GAME_CHOICE_MADE  ; input $18 -> choice 1 (Y stays 1)
     cmp #$31
-    bne L82F9
-    iny
+    bne POLL_GAME_CHOICE   ; not $31 either -> keep polling
+    iny                     ; input $31 -> choice 2 (Y=2)
 
-L8309:
+GAME_CHOICE_MADE:
     sty GAME_STATE
-    sty TWO_PLAYER
+    sty TWO_PLAYER          ; (???) both set to the same 1/2 choice value
     dey
-    beq L8315
-    jmp LA274
+    beq MENU_DONE_1P        ; choice was 1 -> simple path
+    jmp LA274                ; choice was 2 -> extra setup (later section)
 
-L8315:
+MENU_DONE_1P:
     jmp CLEAR_PANEL_ALT
 
-L8318:
+MENU_ABORT:
     lda #$00
     sta GAME_STATE
     rts
 
 ; -----------------------------------------------------------------------
-; Set up a fresh play state.
+; Set up a fresh play state: score/lives/road/timer all reset to their
+; starting values, called once from MAIN_RUN_PLAY before the per-frame
+; GAME_LOOP begins.
 INIT_PLAY_STATE:
     jsr CLEAR_RAM_AND_SPRITES
     jsr DELAY_FRAMES_ALT
     ldx GAME_STATE
-    beq L8333
+    beq INIT_PLAY_MUX
     ldx TWO_PLAYER
     cpx #$01
-    beq L8333
+    beq INIT_PLAY_MUX
     ldy #$FF
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
-L8333:
+INIT_PLAY_MUX:
     ldy #$05
-    sty MUX_SLOT2
+    sty MUX_SLOT2       ; sprite-multiplex slot base indices: 5, 4, 3
     dey
     sty MUX_SLOT1
     dey
     sty MUX_SLOT0
     lda #$01
-    sta LIVES
+    sta LIVES           ; start with 1 life
     sta EXTRA_LIFE_AVAIL
-    dec EXTRA_LIFE_AVAIL
+    dec EXTRA_LIFE_AVAIL   ; ...then immediately drop it to 0 = "timer
+                            ;   running/shown" (see the header's timer notes -
+                            ;   $FF would mean "expired")
     lda #$99
-    sta GAME_TIME_LO
+    sta GAME_TIME_LO    ; game timer = BCD 0999 (the starting countdown value)
     lda #$09
     sta GAME_TIME_HI
     ldx #$FF
     stx STATE_4D17
-    stx VIC_SPR_ENA
+    stx VIC_SPR_ENA     ; enable all 8 hardware sprites
     inx
-    inx
+    inx                 ; x = $01
     stx PREV_FEATURE
     stx SEQ_STATE
     stx STATE_4D05
     stx STATE_4DCB
-    inx
-    stx NEXT_LIFE_SCORE
+    inx                 ; x = $02
+    stx NEXT_LIFE_SCORE ; (???) likely an index into a score-threshold table
+                        ;   rather than a raw score value
     stx MUX_SLOT_IDX
     lda #$0E
-    sta VIC_SPRMC0
+    sta VIC_SPRMC0      ; shared sprite colour 1: light blue
     lda #$01
-    sta VIC_SPRMC1
+    sta VIC_SPRMC1      ; shared sprite colour 2: white
+
+; Pick which game-state handler VEC_STATE should dispatch to (via
+; GAME_DISPATCH, every frame) for the game that's about to start - one of
+; three addresses depending on GAME_STATE/NUM_PLAYERS. The handlers
+; themselves ($A189/$A152/$A9F6) live in a later part of the ROM not covered
+; by this stage. (???)
     lda #$89
     ldy #$A1
     ldx GAME_STATE
-    beq L8393
+    beq SET_STATE_VEC        ; GAME_STATE=0 (attract) -> $A189
     ldx NUM_PLAYERS
     dex
-    beq L838F
+    beq ONE_PLAYER_VEC       ; NUM_PLAYERS=1 -> $A152
     lda #$F6
     ldy #$A9
-    bne L8393
+    bne SET_STATE_VEC         ; NUM_PLAYERS=2 -> $A9F6
 
-L838F:
+ONE_PLAYER_VEC:
     lda #$52
     ldy #$A1
 
-L8393:
+SET_STATE_VEC:
     sta VEC_STATE
     sty VEC_STATE_HI
 
@@ -953,7 +1161,9 @@ RESET_SCREEN_STATE:
     jsr CLEAR_PANEL
 
 ; -----------------------------------------------------------------------
-; Fill colour RAM, init SID, zero ZP $DC-$FF, clear object slots, push sprites.
+; Fill colour RAM, init SID, zero ZP $DC-$FF (score/flags/effect-timer zero
+; page variables - see the equates section), clear all 8 object slots, and
+; push their sprites off-screen.
 CLEAR_RAM_AND_SPRITES:
     jsr CLEAR_COLOR_RAM
     jsr SID_INIT
@@ -961,24 +1171,33 @@ CLEAR_RAM_AND_SPRITES:
     ldy #$00
     tya
 
-L83A7:
+ZERO_ZP_TAIL_LOOP:
     sta ZP_00,x
     inx
-    bne L83A7
+    bne ZERO_ZP_TAIL_LOOP    ; x wraps $FF->$00 and bne stops - covers $DC-$FF
     lda #$FE
     sta BIT_MASK_INV
 
-L83B0:
+; Loop exactly 8 times, once per object slot: BIT_MASK_INV starts as
+; %11111110. Each pass, "sec" forces a 1 into the bottom bit and "rol" shifts
+; everything left one place, moving the top bit out into the carry flag;
+; "bcs" (branch if carry set) loops again as long as that bit was a 1. Since
+; only ONE bit of the starting value was 0, this walks that single 0 bit
+; through all 8 positions and stops right after it shifts out - a common
+; 6502 idiom for "repeat exactly N times" when you don't want to spend a
+; separate counter byte.
+INIT_ALL_OBJECT_SLOTS_LOOP:
     jsr INIT_OBJECT_SLOT
     lda #$95
-    sta SPRPTR_6400,x
+    sta SPRPTR_6400,x   ; point this slot's sprite at the blank/empty shape
     inx
     iny
     iny
     sec
     rol BIT_MASK_INV
-    bcs L83B0
-    jmp LA361
+    bcs INIT_ALL_OBJECT_SLOTS_LOOP
+    jmp LA361            ; tail-jump onward (continues elsewhere, not covered
+                        ;   by this stage - that routine eventually rts's back)
 
 ; -----------------------------------------------------------------------
 ; Raster IRQ, top of frame ($83C3, vectored from IRQ_MAIN).

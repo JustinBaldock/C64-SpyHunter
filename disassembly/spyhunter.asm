@@ -2141,111 +2141,136 @@ ROTATE_NIBBLE_B:
     beq ROTATE_CHARSET_OUTER
 
 ; -----------------------------------------------------------------------
-; Convert a moving object's world position to a screen cell and stage its sprite.
+; Convert a moving object's world sprite position (SPR_X_SHADOW/SPR_Y_SHADOW,
+; the 9-bit hardware-sprite coordinates - X needs 9 bits since the VIC
+; screen is wider than 255 pixels, hence the SPR_XMSB high-bit table) into a
+; screen column/row (OBJ_TBLB3/OBJ_TBLBB, matching the labels already
+; confirmed in claude/Weapons_Truck_Notes.md), tracks whether the object is
+; currently within the visible vertical range (via HIT_ACCUM - see below),
+; and classifies the road tile(s) under the object into a "distance" bucket
+; via OBJ_DIST_TBL - almost certainly driving Spy Hunter's pseudo-3D
+; perspective effect (things further up the screen = further away = drawn
+; smaller/differently), though the exact use of the resulting bucket value
+; isn't traced past where it's stored. (???)
 OBJ_CALC_SCREEN_POS:
     ldx OBJ_IDX
     clc
     lda BIT_MASK
-    and SPR_XMSB
-    beq L88EA
+    and SPR_XMSB        ; this object's high (9th) X bit
+    beq COMBINE_X_MSB
     sec
 
-L88EA:
-    php
+; Combine the 9th X bit (in carry) with the 8-bit shadow X into one value via
+; ROR, then divide down to a character column: two more LSRs (a slightly
+; different scale than the straight /8 you'd expect - this game's road
+; margins/off-screen area account for the extra "-5" offset below).
+COMBINE_X_MSB:
+    php                 ; stash the carry (9th X bit) - AND/LSR below would clobber it
     ldy OBJ_IDX2
     lda a:SPR_X_SHADOW,y
-    plp
+    plp                 ; get the 9th X bit back into carry
     ror a
     lsr a
     sec
     sbc #$05
     lsr a
     cmp #$04
-    bcc L88FF
+    bcc OBJ_OFFSCREEN   ; column < 4 -> off-screen (left)
     cmp #$24
-    bcc L8904
+    bcc OBJ_ONSCREEN_X  ; column < $24 (36) -> valid on-screen column
 
-L88FF:
-    lda #$FF
-    jmp L8971
+OBJ_OFFSCREEN:
+    lda #$FF            ; off-screen sentinel column
+    jmp OBJ_OFFSCREEN_ROW
 
-L8904:
-    pha
+; On-screen horizontally: store the column, then work out the row from Y,
+; and along the way update HIT_ACCUM - this object's bit is SET while it's
+; within the valid vertical range, CLEARED if it's scrolled off the top or
+; bottom. HIT_ACCUM's per-object bits are presumably consulted by whatever
+; (not yet traced) does pairwise collision/weapon-hit checks, so this is
+; effectively "is this object even eligible to be hit/collide right now".
+OBJ_ONSCREEN_X:
+    pha                 ; save the column
     sta OBJ_TBLB3,x
     lda a:SPR_Y_SHADOW,y
     sec
     sbc #$28
-    bcs L8919
+    bcs OBJ_Y_IN_RANGE
     lda BIT_MASK_INV
-    and HIT_ACCUM
+    and HIT_ACCUM       ; too close to the top -> clear this object's bit
     ldy #$00
-    beq L8930
+    beq OBJ_STORE_HIT_ACCUM  ; (unconditional - the AND above left Z set)
 
-L8919:
+OBJ_Y_IN_RANGE:
     cmp #$C1
-    bcc L8926
+    bcc OBJ_CALC_ROW
     lda BIT_MASK_INV
-    and HIT_ACCUM
+    and HIT_ACCUM       ; too close to the bottom -> clear this object's bit
     ldy #$2C
-    bne L8930
+    bne OBJ_STORE_HIT_ACCUM   ; (unconditional - Y is nonzero)
 
-L8926:
+OBJ_CALC_ROW:
     lsr a
     lsr a
     and #$FE
-    tay
+    tay                 ; Y = row-table index
     lda BIT_MASK
-    ora HIT_ACCUM
+    ora HIT_ACCUM       ; in valid range -> SET this object's bit
 
-L8930:
+OBJ_STORE_HIT_ACCUM:
     sta HIT_ACCUM
-    lda ROWADDR_LO,y
-    sta SRC_PTR
+    lda ROWADDR_LO,y    ; look up this row's screen address (the table built
+    sta SRC_PTR          ;   in BUILD_ROWADDR_LOOP, Stage 2)
     lda ROWADDR_HI,y
     sta SRC_PTR_HI
     tya
     lsr a
-    sta OBJ_TBLBB,x
+    sta OBJ_TBLBB,x     ; store the screen row
     pla
-    tay
-    lda (SRC_PTR),y
-    pha
-    iny
+    tay                 ; column back into Y
+    lda (SRC_PTR),y     ; read the 3 screen-tile bytes at/around the object's
+    pha                  ;   position (whatever's already drawn there - road,
+    iny                   ;   water, another blitted object, ...)
     lda (SRC_PTR),y
     pha
     iny
     lda (SRC_PTR),y
     ldy #$02
-    sty ZTMP_08
+    sty ZTMP_08         ; process 3 bytes total (loop counter)
 
-L8952:
+; For each of the 3 tile bytes read above, find its "distance bucket" by
+; scanning OBJ_DIST_TBL's 13 ascending thresholds (first one the byte is
+; LESS than wins; falls back to bucket 0 if none match) and store the bucket
+; index into OBJ_TBL6B/OBJ_TBL73 (the first and third bytes; the middle one
+; only feeds the next iteration's comparison, per OBJ_BUCKET_NEXT below).
+OBJ_CLASSIFY_TILE_LOOP:
     ldy #$00
 
-L8954:
+OBJ_DIST_SCAN:
     cmp OBJ_DIST_TBL,y
-    bcc L8960
+    bcc OBJ_BUCKET_FOUND
     iny
     cpy #$0D
-    bcc L8954
-    ldy #$00
+    bcc OBJ_DIST_SCAN
+    ldy #$00            ; no threshold matched -> bucket 0
 
-L8960:
+OBJ_BUCKET_FOUND:
     tya
     dec ZTMP_08
-    bmi L8977
-    beq L896A
+    bmi OBJ_TILE_CLASSIFY_DONE
+    beq OBJ_BUCKET_NEXT
     sta OBJ_TBL6B,x
 
-L896A:
+OBJ_BUCKET_NEXT:
     sta OBJ_TBL73,x
     pla
-    jmp L8952
+    jmp OBJ_CLASSIFY_TILE_LOOP
 
-L8971:
+OBJ_OFFSCREEN_ROW:
     sta OBJ_TBL6B,x
     sta OBJ_TBL73,x
 
-L8977:
+OBJ_TILE_CLASSIFY_DONE:
     sta OBJ_TBL63,x
     rts
 ; -----------------------------------------------------------------------
@@ -2261,7 +2286,19 @@ L8977:
     .byte $A5,$05,$90,$04,$05,$DA,$D0,$04,$49,$FF,$25,$DA,$85,$DA,$18,$60
 
 ; -----------------------------------------------------------------------
-; Compute the object's on-screen sprite offset and stage the hardware sprite.
+; For the CURRENT object (OBJ_IDX2), compute its X/Y DELTA to each of the 8
+; hardware sprites in turn, clamp each delta to a signed 7-bit range, and
+; pack it (sign bit + magnitude) into SPR_STAGE. This looks like prep work
+; for the sprite-multiplexing system (SPR_STAGE is consumed elsewhere as
+; "staged hardware sprite coords") - likely used to decide proximity/
+; ordering when deciding which hardware sprite to reassign to which object,
+; though the exact downstream use isn't traced from here. (???)
+;
+; The outer/inner-loop split (ZTMP_0A starting at 1, doubled via ASL each
+; pass, looping while carry stays clear) is the same "repeat exactly 8
+; times without a separate counter byte" idiom seen in
+; INIT_ALL_OBJECT_SLOTS_LOOP (Stage 2) - it walks the single 1-bit through
+; all 8 positions.
 OBJ_CALC_SPRITE_DELTA:
     ldy OBJ_IDX2
     ldx #$00
@@ -2270,10 +2307,13 @@ OBJ_CALC_SPRITE_DELTA:
     lda BIT_MASK
     and SPR_XMSB
     clc
-    beq L8A1B
+    beq OBJ_DELTA_GET_XY
     sec
 
-L8A1B:
+; Combine this object's 9th X bit with its 8-bit X (same ROR trick as
+; OBJ_CALC_SCREEN_POS) into ZTMP_0C; save its Y into ZTMP_0D. These become
+; the "origin" every hardware sprite's delta is measured from.
+OBJ_DELTA_GET_XY:
     lda a:SPR_X_SHADOW,y
     ror a
     sta ZTMP_0C
@@ -2281,66 +2321,74 @@ L8A1B:
     sta ZTMP_0D
     ldy #$00
 
-L8A28:
+OBJ_DELTA_LOOP:
     lda ZTMP_0A
     and SPR_XMSB
     clc
-    beq L8A30
+    beq OBJ_DELTA_X
     sec
 
-L8A30:
+; X delta: subtract this object's X from hardware sprite X's (9-bit-combined
+; via the same ROR trick). If negative, take the absolute value and clamp
+; to 63 (with the sign bit re-added via ORA #$40 - not two's complement, a
+; sign+magnitude encoding); if positive, just clamp to 63. Either way,
+; double it (ASL) before storing - SPR_STAGE presumably reserves the low bit
+; for something else, or this doubling matches a table stride elsewhere.
+OBJ_DELTA_X:
     lda SPR_X_SHADOW,x
     ror a
     sec
     sbc ZTMP_0C
-    bpl L8A47
-    eor #$FF
-    clc
+    bpl OBJ_DELTA_X_POS
+    eor #$FF            ; negate (with the +1 below, this is -value via
+    clc                  ;   two's-complement negation)
     adc #$01
     cmp #$40
-    bcc L8A43
+    bcc OBJ_DELTA_X_NEG_CLAMP
     lda #$3F
 
-L8A43:
-    ora #$40
-    bne L8A4D
+OBJ_DELTA_X_NEG_CLAMP:
+    ora #$40            ; set the sign bit on the (now-positive) magnitude
+    bne OBJ_DELTA_X_STORE   ; (unconditional - ORA #$40 is never zero)
 
-L8A47:
+OBJ_DELTA_X_POS:
     cmp #$40
-    bcc L8A4D
+    bcc OBJ_DELTA_X_STORE
     lda #$3F
 
-L8A4D:
+OBJ_DELTA_X_STORE:
     asl a
     sta a:SPR_STAGE,y
     iny
     sec
+    ; same clamp-and-sign pattern again, this time for Y (range 0-127
+    ; instead of 0-63, since Y doesn't get doubled/shared the same way)
     lda SPR_Y_SHADOW,x
     sbc ZTMP_0D
-    bpl L8A68
+    bpl OBJ_DELTA_Y_POS
     eor #$FF
     clc
     adc #$01
     cmp #$80
-    bcc L8A64
+    bcc OBJ_DELTA_Y_NEG_CLAMP
     lda #$7F
 
-L8A64:
+OBJ_DELTA_Y_NEG_CLAMP:
     ora #$80
-    bne L8A6E
+    bne OBJ_DELTA_Y_STORE    ; (unconditional)
 
-L8A68:
+OBJ_DELTA_Y_POS:
     cmp #$80
-    bcc L8A6E
+    bcc OBJ_DELTA_Y_STORE
     lda #$7F
 
-L8A6E:
+OBJ_DELTA_Y_STORE:
     sta a:SPR_STAGE,y
     iny
     inx
     inx
     asl ZTMP_0A
-    bcc L8A28
+    bcc OBJ_DELTA_LOOP
     rts
 
 ; -----------------------------------------------------------------------
@@ -2359,15 +2407,32 @@ OBJ_VEC2_DISPATCH:
     jmp ($0073)
 
 ; -----------------------------------------------------------------------
-; Moving-object engine (per frame).
+; Moving-object engine (per frame) - walks all 8 object slots (7 downto 0),
+; runs each one's type-specific move and draw handlers (reached indirectly
+; through OBJ_VEC1_DISPATCH/OBJ_VEC2_DISPATCH - see ZVEC_MOVE/ZVEC_DRAW in
+; the equates), and builds two "collision mask" bytes (HIT_MASK_A/B) at the
+; end from whichever objects are currently on-screen (HIT_ACCUM, built up
+; per-slot by OBJ_CALC_SCREEN_POS) AND flagged as belonging to certain
+; "hit groups" (HIT_GROUP0/1/2 - presumably "hero", "enemy", "hazard" or
+; similar categories, not confirmed). This is very likely the entry point
+; into collision handling, though the actual pairwise hit-test and the
+; enemy-destroyed -> SCORE_EVENT logic live inside the per-type handlers
+; dispatched below (see the note on the following data block - those
+; handlers are stored as raw, not-yet-disassembled bytes).
 PROCESS_OBJECTS:
     ldx #$07
     lda #$80
-    sta BIT_MASK
+    sta BIT_MASK        ; BIT_MASK starts as %10000000 (slot 7's bit)...
     eor #$FF
-    sta BIT_MASK_INV
+    sta BIT_MASK_INV    ; ...and BIT_MASK_INV its complement
 
-L8A8C:
+; Per-slot setup: point VEC_OBJMOVE at this slot's move routine (from the
+; per-SLOT OBJMOVE_VEC_LO/HI table), then either dispatch through it
+; directly (if OBJ_TYPE's top bit is set - the hero/empty-slot convention
+; from claude/Dock_Exit_Notes.md) or, for ordinary positive OBJ_TYPE values,
+; copy this TYPE's 4-byte move+draw vector pair out of OBJINIT_PARAM_TBL
+; into ZVEC_MOVE/ZVEC_DRAW and run the full move -> position -> draw chain.
+OBJECT_LOOP:
     stx OBJ_IDX
     txa
     asl a
@@ -2381,77 +2446,90 @@ L8A8C:
     lda OBJMOVE_VEC_HI,y
     sta VEC_OBJMOVE_HI
     lda OBJ_TYPE,x
-    bpl L8AB0
-    jsr OBJ_MOVE_DISPATCH
-    bcc L8AFF
+    bpl TYPE_DISPATCH
+    jsr OBJ_MOVE_DISPATCH   ; type has bit 7 set -> hero/empty-slot handler
+    bcc OBJECT_LOOP_NEXT
 
-L8AB0:
+TYPE_DISPATCH:
     lda OBJ_TYPE,x
     sta ZTMP_0F
     asl a
-    asl a
+    asl a               ; TYPE * 4 = byte offset into OBJINIT_PARAM_TBL
     tay
     ldx #$00
 
-L8AB9:
+COPY_TYPE_VECTORS:
     lda OBJINIT_PARAM_TBL,y
-    sta ZVEC_MOVE,x
+    sta ZVEC_MOVE,x     ; copies 4 bytes: move-vec lo/hi, draw-vec lo/hi
     iny
     inx
     cpx #$04
-    bne L8AB9
+    bne COPY_TYPE_VECTORS
     jsr OBJ_CALC_SCREEN_POS
     jsr OBJ_CALC_SPRITE_DELTA
     ldy OBJ_IDX2
     ldx OBJ_IDX
-    jsr OBJ_VEC1_DISPATCH
+    jsr OBJ_VEC1_DISPATCH   ; run this type's MOVE handler
     ldx OBJ_IDX
     lda OBJ_ANIM,x
     asl a
     tay
-    lda (ZVEC_DRAW),y
-    pha
-    iny
+    lda (ZVEC_DRAW),y   ; the draw vector is itself a small per-ANIM-frame
+    pha                  ;   table - so each object type can have a
+    iny                   ;   different draw routine per animation frame
     lda (ZVEC_DRAW),y
     sta ZVEC_DRAW_HI
     pla
     sta ZVEC_DRAW
     ldy OBJ_IDX2
-    jsr OBJ_VEC2_DISPATCH
+    jsr OBJ_VEC2_DISPATCH   ; run this frame's DRAW handler
+
+; After moving/drawing, update this slot's bit in HIT_ACCUM based on its
+; screen Y: only objects roughly within rows $37-$EF count as "on-screen for
+; collision purposes" (a tighter vertical band than OBJ_CALC_SCREEN_POS's
+; own on/off-screen test).
     ldy OBJ_IDX2
     lda HIT_ACCUM
     ldx SPR_Y_SHADOW,y
     cpx #$37
-    bcc L8AFA
+    bcc CLEAR_HIT_BIT
     cpx #$F0
-    bcs L8AFA
+    bcs CLEAR_HIT_BIT
     ora BIT_MASK
-    bne L8AFC
+    bne STORE_HIT_BIT   ; (unconditional - ORA of a nonzero bit is nonzero)
 
-L8AFA:
+CLEAR_HIT_BIT:
     and BIT_MASK_INV
 
-L8AFC:
+STORE_HIT_BIT:
     sta HIT_ACCUM
 
-L8AFF:
+OBJECT_LOOP_NEXT:
     ldx OBJ_IDX
 
-L8B01:
+; Advance to the next slot: BIT_MASK/BIT_MASK_INV shift down together (same
+; single-bit-walk idiom as before, here counting DOWN through slots 7-0
+; instead of up), skipping any slot currently reserved by the sprite
+; multiplexer (MUX_SLOT0/1/2 - those get processed separately, not as
+; ordinary objects here).
+NEXT_SLOT:
     lsr BIT_MASK
     sec
     ror BIT_MASK_INV
     dex
-    bmi L8B1B
+    bmi ALL_SLOTS_DONE
     cpx MUX_SLOT0
-    beq L8B01
+    beq NEXT_SLOT
     cpx MUX_SLOT1
-    beq L8B01
+    beq NEXT_SLOT
     cpx MUX_SLOT2
-    beq L8B01
-    jmp L8A8C
+    beq NEXT_SLOT
+    jmp OBJECT_LOOP
 
-L8B1B:
+; All 8 slots processed: combine HIT_ACCUM (which slots are on-screen) with
+; the HIT_GROUP0/1/2 masks (which slots belong to which collision category)
+; into two final masks other code checks for actual collisions.
+ALL_SLOTS_DONE:
     lda HIT_GROUP0
     and HIT_ACCUM
     and HIT_GROUP1
@@ -2461,8 +2539,26 @@ L8B1B:
     sta HIT_MASK_B
     rts
 ; -----------------------------------------------------------------------
-; OBJMOVE_VEC_LO/HI + OBJINIT_PARAM_TBL, then object / hero state-machine
-; handlers stored as data (reached through VEC_OBJMOVE / VEC_STATE).
+; OBJMOVE_VEC_LO/HI (8 addresses, one per SLOT) + OBJINIT_PARAM_TBL (4-byte
+; move/draw vector entries, one per object TYPE - the first 4 entries here
+; are TYPE $00-$03, all identical: move=$9A8E draw=$90AA, matching the hero
+; sub-state finding in claude/Dock_Exit_Notes.md / Enemy_Invincibility_Notes.md).
+;
+; After the vector tables, this data block continues into the ACTUAL MACHINE
+; CODE for the per-object-type move/draw handlers themselves (e.g. the
+; hero's own move logic starting around $8EA5 - readable opcode-by-opcode if
+; you want to trace it: A5 A3 = LDA HERO_STATE, C9 07 = CMP #$07, and so on).
+; These handlers are only ever reached INDIRECTLY, through OBJ_VEC1_DISPATCH/
+; OBJ_VEC2_DISPATCH's runtime pointer lookup (PROCESS_OBJECTS above) - a
+; disassembler walking the file top-to-bottom in a straight line has no way
+; to know code lives here, so it's left as raw .byte data rather than
+; expanded into labelled instructions. This is genuinely the single largest
+; remaining undisassembled chunk of real game logic in this file - it's
+; extremely likely where per-enemy-type behaviour (the Road Lord's "can't be
+; shot", the different weapons, etc. - see claude/Enemy_Agents_Manual_Reference.md)
+; and the enemy-destroyed -> SCORE_EVENT scoring-tier logic actually live.
+; Turning this into real, commented 6502 (rather than one big data blob) is
+; a substantial task of its own, left for a future session.
     .byte $AF,$8B,$D4,$8B,$5B,$8C,$5E,$8C,$5B,$8C,$5E,$8C,$90,$8C,$C2,$8C
     .byte $8E,$9A,$AA,$90,$8E,$9A,$AA,$90,$8E,$9A,$AA,$90,$8E,$9A,$AA,$90
     .byte $2E,$8B,$4D,$92,$F1,$99,$AA,$92,$F1,$99,$A2,$93,$80,$9A,$38,$8F
@@ -2514,7 +2610,11 @@ L8B1B:
     .byte $8E,$38,$60,$A4,$07
 
 ; -----------------------------------------------------------------------
-; Clear moving-object slot X.
+; Clear moving-object slot X (Y = X*2, i.e. caller passes OBJ_IDX/OBJ_IDX2
+; already set up, same convention as PROCESS_OBJECTS): zero its sprite
+; position, mark it OBJ_TYPE=$FF (empty), point its hardware sprite at the
+; blank shape, and clear its bit out of every hit-related mask - a freshly
+; emptied slot can't be on-screen or collidable.
 INIT_OBJECT_SLOT:
     lda BIT_MASK_INV
     and SPR_XMSB
@@ -2524,9 +2624,10 @@ INIT_OBJECT_SLOT:
     sta a:SPR_Y_SHADOW,y
     sta OBJ_TBLAB,x
     lda #$FF
-    sta OBJ_TYPE,x
+    sta OBJ_TYPE,x      ; $FF = empty (per the hero/type convention already
+                        ;   documented in claude/Dock_Exit_Notes.md)
     lda #$95
-    jsr SET_SPRITE_PTR
+    jsr SET_SPRITE_PTR  ; $95 = the blank/empty sprite shape
     lda BIT_MASK_INV
     and HIT_GROUP0
     sta HIT_GROUP0
@@ -2545,7 +2646,17 @@ INIT_OBJECT_SLOT:
     clc
     rts
 ; -----------------------------------------------------------------------
-; State-machine handler code and jump tables (object / hero behaviour), as data.
+; More per-object-type/hero state-machine handler CODE stored as raw data,
+; same situation as the block right after PROCESS_OBJECTS above (only
+; reachable indirectly via the ZVEC_MOVE/ZVEC_DRAW/VEC_STATE dispatch
+; vectors, so never picked up as code by a straight-line disassembly pass).
+; This is a substantial chunk (~80 lines) - almost certainly containing the
+; individual behaviour of each enemy type (weapons, movement patterns) and
+; the hero's own crash/collision handling. Left as a labelled-but-unexpanded
+; data block for a future session rather than hand-disassembled here; see
+; the equivalent note after PROCESS_OBJECTS for how to start tracing it
+; (each 3-byte "opcode + address" or 2-byte "opcode + value" group can be
+; decoded by hand against a 6502 opcode table).
     .byte $44,$04,$04,$04,$04,$66,$04,$04,$00,$86,$04,$06,$86,$82,$86,$86
     .byte $86,$64,$94,$94,$00,$04,$04,$04,$52,$00,$04,$04,$D0,$D0,$D0,$D0
     .byte $10,$CC,$CE,$58,$58,$CC,$48,$4C,$CC,$D2,$CC,$CC,$CA,$5A,$D0,$D0
@@ -2749,7 +2860,19 @@ SET_SPRITE_PTR:
     sta SPRITE_PTRS,x
     rts
 ; -----------------------------------------------------------------------
-; Weapon / collision handler routines and their dispatch tables, as data.
+; Weapon / collision handler routines and their dispatch tables, as data -
+; the same situation as the two data blocks in Stage 5 above (real 6502
+; code, only reached indirectly via a runtime vector, so left undisassembled
+; by a straight-line pass). This is the LARGEST such block in the file
+; (~1000 bytes) and, per its existing label, is specifically about weapons
+; and collisions - meaning this very likely contains the actual pairwise
+; hit-test against HIT_MASK_A/B (built in PROCESS_OBJECTS above) and the
+; code that queues SCORE_EVENT on an enemy kill (see
+; claude/Enemy_Agents_Manual_Reference.md's confirmed POINTS_TBL - 150/500/
+; 700-point tiers - for what a full decode here would likely explain: which
+; OBJ_TYPE maps to which enemy, and why the Road Lord specifically never
+; registers a hit). A strong candidate for a focused future session rather
+; than folded into this general annotation pass.
     .byte $A5,$33,$29,$03,$D0,$EF,$F0,$E0,$A5,$33,$29,$01,$10,$EA,$AD,$05
     .byte $4D,$F0,$11,$AD,$B9,$4D,$C9,$04,$90,$0A,$C9,$23,$B0,$06,$A9,$00
     .byte $8D,$89,$4D,$60,$A9,$00,$8D,$CB,$4D,$8D,$05,$4D,$AD,$79,$4D,$30

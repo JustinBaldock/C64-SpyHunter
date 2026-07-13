@@ -6,8 +6,11 @@ byte-identical-reassembling disassembly — real 6502 mnemonics with meaningful
 labels and comments, not just raw opcodes — plus a written-up understanding of
 how the game actually works internally.
 
-> This is a personal research project for learning/preservation purposes. It
-> requires the original cartridge ROM (not included) to build and run.
+> This is a personal research project for learning/preservation purposes.
+> The original cartridge ROM dump is included in [`original_files/`](original_files/)
+> for reference and verification (see [Building the `.prg`](#building-the-prg)
+> below) — it is not the author's original work and is included only in the
+> spirit of preservation/archival research.
 
 ## What's in this repo
 
@@ -16,7 +19,7 @@ how the game actually works internally.
 | [`disassembly/`](disassembly/) | The annotated source (`spyhunter.asm`), linker config, `Makefile`, and build docs. |
 | [`claude/`](claude/) | Write-ups of specific findings — enemies, scoring, the road/level graph, the boat crossing, the weapons van, collision handling, etc. |
 | [`tools/`](tools/) | Small Python utilities built along the way (see [Tools](#tools) below). |
-| [`original_files/`](original_files/) | The source cartridge dump and the scanned/OCR'd game manual. |
+| [`original_files/`](original_files/) | The original cartridge ROM dump (`SpyHunter.crt` / `Spy Hunter (1983)(U.S. Gold).crt`, both raw 16 KB images, MD5 `ee7fe8c9a5179aa8b23d8f1e49cf113c`), plus the scanned/OCR'd game manual (`Spy_Hunter_1984_Sega.pdf`). |
 | [`references/`](references/) | 6502/cc65 reference material used while annotating. |
 
 ## The process
@@ -161,6 +164,13 @@ cd disassembly
 make            # -> spyhunter.bin (raw ROM) and spyhunter.prg (disk-loadable)
 make verify     # rebuild and check the ROM's MD5 against the known-good hash
 make clean
+```
+
+You can also diff the rebuilt ROM directly against the original dump in
+`original_files/` (once `LIVES` is set back to `#$01` — see the note below):
+
+```sh
+cmp spyhunter.bin "../original_files/SpyHunter.crt"   # no output = byte-identical
 ```
 
 Or run the two steps by hand:

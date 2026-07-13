@@ -138,13 +138,13 @@ separately checked by explicit `CMP #imm` branches elsewhere — all four confir
 | feature | checked at | effect |
 |---|---|---|
 | `$11` | `UPDATE_SCENE_SELECT`, `disassembly/spyhunter.asm:2361-2374` | scene/difficulty select |
-| `$13` | panel/colour-cycle code near `L8474` | river-entrance transition (`spyhunter.asm` header) |
+| `$13` | `IRQ_MAIN` bottom-half, `disassembly/spyhunter.asm:1099-1132` | **water-entry**: on the last row of its row-repeat cycle, re-arms all four `SPRMUX_CNT*` sprite-multiplex counters for 25 rows starting at row `$04`, plus a matching 4-cell colour-RAM block; river-entrance transition (`spyhunter.asm` header) |
 | `$14` | effects code at `LA60E`/`LA62D`, `disassembly/spyhunter.asm:3619-3663` | **random object spawn**: ~2.3% chance per pass through the repeating water loop (segments `$12`/`$13`) to blit one of two small tile shapes (`$A598`/`$A5BB`) via the shared `DRAW_OBJECT_TILES` blit parameters — confirmed by `water-enemyboat-score14505.vsf`; see `claude/Boat_River_Notes.md` |
-| `$15` | panel/colour-cycle code near `L8474` | (effect not yet traced) |
+| `$15` | same `IRQ_MAIN` code as `$13` | **water-exit**: mirrors `$13`, re-arms the same sprite-mux counters for 25 rows starting at row `$14` instead — confirmed by `exit-water.vsf`; see `claude/Boat_River_Notes.md` |
 
-`$10` itself (seen live in segment `$08`, snapshot `level1-score4550-timer559`, the road just
-before the river/boat/bridge arc begins) isn't directly `CMP`'d anywhere found so far — still
-open.
+All four `$11/$13/$14/$15` "scripted trigger" feature codes are now traced. `$10` itself (seen
+live in segment `$08`, snapshot `level1-score4550-timer559`, the road just before the
+river/boat/bridge arc begins) isn't directly `CMP`'d anywhere found so far — still open.
 
 ## Full segment row-by-row table (ROM bytes, code's actual reverse play order)
 
@@ -194,7 +194,6 @@ plain road ...`
 ## Next steps
 
 * Feature `$10`'s exact meaning (segment `$08`) — no direct `CMP` site found yet.
-* Feature `$15`'s effect (checked near `L8474` alongside `$13`, not yet traced).
 * Feature `$03` (the row between the two boat rows in segment `$11`) — likely a water
   current/wake variant, not yet visually confirmed.
 * What makes an enemy briefly unshootable near the bridge — see

@@ -137,6 +137,14 @@
 ;        blit params - confirmed by a randomly-encountered enemy boat (snapshot
 ;        "water enemyboat"). Full 31-segment row-by-row graph now in
 ;        claude/Road_Map_Decode.md.
+;     7. ROAD_FEATURE $44=$15 is the water-EXIT counterpart to $13's water-entry
+;        trigger (confirmed by snapshot "exit water", seg $13, prev $14). Both are
+;        checked in IRQ_MAIN's bottom-half handler ($8474-$84C9): on the last row of
+;        their row-repeat cycle they re-arm all four SPRMUX_CNT* sprite-multiplex
+;        counters for 25 rows starting at a computed row ($04 on entry, $14 on exit)
+;        plus a matching 4-cell colour-RAM block - most likely what schedules the
+;        extra multiplexed hazard/enemy-boat sprites at the river's boundaries. This
+;        resolves the last of the four $11/$13/$14/$15 scripted-trigger codes.
 ;
 ; RUNTIME MEMORY MAP
 ;   $00-$01 6510 I/O port ($01=$05 run) ; $02-$04 high score BCD

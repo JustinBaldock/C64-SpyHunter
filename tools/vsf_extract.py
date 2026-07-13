@@ -54,3 +54,12 @@ if __name__=="__main__":
             else: s+="?"
         return s
     print(f"PANEL $6798: '{read_panel(0x6798)}'")
+    print("--- Moving-object table (slots 0-7; per spyhunter.asm OBJ_* equates) ---")
+    print(f"{'slot':>4} {'TYPE $A2':>9} {'ANIM $9A':>9} {'TBL63 $4D63':>12} "
+          f"{'TBL6B $4D6B':>12} {'TBL73 $4D73':>12} {'TBLB3 $4DB3':>12} {'TBLBB $4DBB':>12}")
+    for slot in range(8):
+        vals = [b(0xA2+slot), b(0x9A+slot), b(0x4D63+slot), b(0x4D6B+slot),
+                b(0x4D73+slot), b(0x4DB3+slot), b(0x4DBB+slot)]
+        widths = [9, 9, 12, 12, 12, 12, 12]
+        row = " ".join(f"{v:02X}".rjust(w) for v, w in zip(vals, widths))
+        print(f"{slot:>4} {row}")

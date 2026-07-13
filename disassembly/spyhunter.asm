@@ -109,6 +109,27 @@
 ;        raster buffer-flip; the road scroll is frozen (SCROLL_SPEED=$00) on game
 ;        over so the text overlays the road and stays put.
 ;
+;   BOAT / BROKEN BRIDGE (snapshots "become boat", "crash into water", "skip broken
+;   bridge return to road"):
+;     1. ROAD_FEATURE $44=$02 is the boat/water-crossing row (segment $11, rows
+;        $02/$03/$02 played in that order - boat, an unidentified $03 row, boat
+;        again). Reached from the river-entrance segment $0F (feature $13).
+;     2. ROAD_FEATURE $44=$0F is a scripted "broken bridge, return to road" segment
+;        transition (segment $0B, the boat segment's branch target: rows $0F/$05/$06
+;        played in that order) - not an in-the-moment player hazard.
+;     3. Both index the SAME generic OBJ_ADDR_LO/HI graphics table as ordinary road
+;        rows ($02->SCROLL_SRC=$2AC0, $0F->$4A40) - no special-case blitter. That
+;        table is exactly 16 entries ($00-$0F), spanning RAM $2980-$4CFF and ending
+;        right at the $4D00 game-state boundary; feature codes $10+ fall outside its
+;        clean address progression and several ($11/$13/$14/$15) are separately
+;        checked by CMP #imm branches (UPDATE_SCENE_SELECT and others) as
+;        scene-transition triggers rather than plain tile indices.
+;     4. "Enemy unshootable" (near the bridge) is NOT yet explained: the only
+;        anomaly found is the hero's own HERO_STATE=$11 (unique among all captured
+;        snapshots, including another bridge snapshot at HERO_STATE=$00) - no
+;        per-enemy invincibility flag was found. Inconclusive from one snapshot; see
+;        claude/Enemy_Invincibility_Notes.md.
+;
 ; RUNTIME MEMORY MAP
 ;   $00-$01 6510 I/O port ($01=$05 run) ; $02-$04 high score BCD
 ;   $12-$2F working pointers            ; $34-$41 IRQ/raster split state

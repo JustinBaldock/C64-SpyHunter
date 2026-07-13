@@ -132,36 +132,71 @@ game-state-variable boundary:
 | `$0F` | `$4A40` | `$16` | `$01` | **broken-bridge skip / return to road** (`claude/Broken_Bridge_Notes.md`) |
 
 Feature codes `$10` and above fall **outside** this table's clean address progression (they land
-in a second region, `$C000`-`$D000+`, not the smooth `$2980-$4CFF` run) and several of them
-(`$11`, `$13`, `$14`, `$15`) are separately checked by explicit `CMP #imm` branches elsewhere —
-`UPDATE_SCENE_SELECT` (`disassembly/spyhunter.asm:2361-2374`) checks `$11`, panel/colour-cycle
-code near `L8474` checks `$13`/`$15`, effects code near `LA60E` checks `$14`. So `$10`+ double as
-scene-transition triggers, not just tile indices; `$13` = the river-entrance transition
-(documented in the `spyhunter.asm` header). `$10` itself (seen live in segment `$08`, snapshot
-`level1-score4550-timer559`, the road just before the river/boat/bridge arc begins) isn't
-directly `CMP`'d anywhere found so far — recorded as still open below.
+in a second region, `$C000`-`$D000+`, not the smooth `$2980-$4CFF` run) and several of them are
+separately checked by explicit `CMP #imm` branches elsewhere — all four confirmed:
 
-Per-segment feature streams (ROM bytes, read in the code's actual **reverse** play order) for the
-segments pinned by snapshots this session:
+| feature | checked at | effect |
+|---|---|---|
+| `$11` | `UPDATE_SCENE_SELECT`, `disassembly/spyhunter.asm:2361-2374` | scene/difficulty select |
+| `$13` | panel/colour-cycle code near `L8474` | river-entrance transition (`spyhunter.asm` header) |
+| `$14` | effects code at `LA60E`/`LA62D`, `disassembly/spyhunter.asm:3619-3663` | **random object spawn**: ~2.3% chance per pass through the repeating water loop (segments `$12`/`$13`) to blit one of two small tile shapes (`$A598`/`$A5BB`) via the shared `DRAW_OBJECT_TILES` blit parameters — confirmed by `water-enemyboat-score14505.vsf`; see `claude/Boat_River_Notes.md` |
+| `$15` | panel/colour-cycle code near `L8474` | (effect not yet traced) |
+
+`$10` itself (seen live in segment `$08`, snapshot `level1-score4550-timer559`, the road just
+before the river/boat/bridge arc begins) isn't directly `CMP`'d anywhere found so far — still
+open.
+
+## Full segment row-by-row table (ROM bytes, code's actual reverse play order)
+
+Extracted directly from the assembled ROM (`ROAD_PTR_LO/HI_TBL` + `ROAD_LEN_TBL`, walked the same
+`dey`-first order the game itself uses — `disassembly/spyhunter.asm:1250-1255`). This resolves the
+"decode the per-segment feature-list bytes" open item in full, not just the snapshotted segments:
 
 ```
-seg $0C (bridge):        $01                        (single row)
-seg $0B (return-to-road): $0F -> $05 -> $06          (broken-bridge skip, then plain road)
-seg $11 (boat):           $02 -> $03 -> $02           (boat, unidentified $03 row, boat)
-seg $08 (pre-river road): $0C -> $10 -> $08 -> $09 -> $12 -> $0A -> $11 -> $09 -> $12
+seg $00: main=$1D branch=$1D  11
+seg $01: main=$02 branch=$03  11 09 12
+seg $02: main=$08 branch=$05  0C 10 08 09 12 0A 0B 10 05 06 04 07 08 09 12
+seg $03: main=$06 branch=$04  0D 10 05 06 04 07 08 11 0B 05 06 04 07 08 09 12
+seg $04: main=$07 branch=$07  0D 05 06 04 07
+seg $05: main=$07 branch=$07  0D 05 06 04 07
+seg $06: main=$07 branch=$07  0C 10
+seg $07: main=$10 branch=$10  08 11 13
+seg $08: main=$09 branch=$0E  0C 10 08 09 12 0A 11 09 12
+seg $09: main=$0A branch=$0A  0C 04
+seg $0A: main=$0B branch=$0B  02
+seg $0B: main=$0C branch=$0C  0F 05 06
+seg $0C: main=$0D branch=$0D  01                          (bridge)
+seg $0D: main=$0F branch=$0F  05 06 05 06 04 07
+seg $0E: main=$0F branch=$0F  0D 05 06
+seg $0F: main=$11 branch=$11  08 11 13                    (river-entrance, ends on $13)
+seg $10: main=$12 branch=$0B  02                           (boat)
+seg $11: main=$12 branch=$0B  02 03 02                     (boat)
+seg $12: main=$13 branch=$13  0E 14                        (repeating loop)
+seg $13: main=$12 branch=$14  14 15                        (repeating loop, FORK)
+seg $14: main=$15 branch=$17  0F 10 08 11 0B 05 06 05 06 04 07 04 07 08 09 12
+seg $15: main=$16 branch=$16  0C
+seg $16: main=$1A branch=$1A  01
+seg $17: main=$18 branch=$18  0D 04
+seg $18: main=$19 branch=$19  02
+seg $19: main=$1A branch=$1A  07
+seg $1A: main=$1B branch=$1B  10 08 11 09 12
+seg $1B: main=$1C branch=$1C  00
+seg $1C: main=$01 branch=$01  12 0A
+seg $1D: main=$01 branch=$1E  19
+seg $1E: main=$01 branch=$01  19
 ```
 
-confirming the scripted chain: `... segment $08/$09/$0A/$0B/$0C/$0D/$0F (river-entrance,
-feature $13) -> segment $11 (boat, feature $02) -> [branch] -> segment $0B (feature $0F,
-broken-bridge return) -> plain road ...`
+This confirms the full scripted chain end-to-end: `... $08/$09/$0A/$0B/$0C(bridge)/$0D/$0F
+(river-entrance, feature $13) -> $11 (boat, feature $02, random enemy-boat spawns via feature
+$14 further round the $12/$13 loop) -> [branch] -> $0B (feature $0F, broken-bridge return) ->
+plain road ...`
 
 ## Next steps
 
 * Feature `$10`'s exact meaning (segment `$08`) — no direct `CMP` site found yet.
+* Feature `$15`'s effect (checked near `L8474` alongside `$13`, not yet traced).
 * Feature `$03` (the row between the two boat rows in segment `$11`) — likely a water
   current/wake variant, not yet visually confirmed.
 * What makes an enemy briefly unshootable near the bridge — see
   `claude/Enemy_Invincibility_Notes.md` (inconclusive from a single snapshot; needs a paired
   before/after capture).
-* Full row-by-row expansion of the remaining un-snapshotted segments (`$02`-`$07`, `$0D`-`$0E`,
-  `$12`-`$1E`).

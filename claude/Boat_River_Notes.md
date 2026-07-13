@@ -37,6 +37,65 @@ drawn through the **same generic per-row tile blitter** as plain road/bridge row
 own graphics block — consistent with `claude/Water_Bridge_Notes.md`'s finding that water/bridge
 tiles are ordinary map tiles, not sprites or a separate rendering layer.
 
+## The "boat mode" object flag ($02 in OBJ_TBL63/6B/73)
+
+Across all three water snapshots on file (`become-boat`, `crash-into-water`,
+`water-enemyboat-score14505`), every object slot that's visibly a boat has
+`OBJ_TBL63 = OBJ_TBL6B = OBJ_TBL73 = $02` (all three of the parallel per-slot state arrays at
+`$4D63`/`$4D6B`/`$4D73` set to the same value) — e.g. `become-boat` slot 2 (`TYPE=$14`) and slot 6
+(`TYPE=$06`) both show `02 02 02`; `water-enemyboat-score14505` slot 2 (`TYPE=$13`) and slot 6
+(`TYPE=$06`) do too. In every plain-road snapshot these three bytes are `$00` for ordinary enemy
+slots. That's consistent with `$02` being a shared **locomotion/terrain-mode flag** (car vs. boat)
+rather than something specific to any one object type — the same three-array triplet flags the
+hero's own boat state too (`become-boat`/`crash-into-water` have it on slot 1's peers turning
+boat-shaped, though the hero's own `HERO_STATE`/`OBJ_TYPE[1]` stays `$FF` in both, so the "am I a
+boat" state for the player must live elsewhere - possibly `SCENE_ID` transitions handle the
+player case specifically while `OBJ_TBL63/6B/73` handles NPCs).
+
+## Enemy boat spawn: ROAD_FEATURE $14 (segment $12/$13 repeating loop)
+
+`spyhunter-water-enemyboat-score14505.vsf` (score 14505, seg_idx `$12`, feature `$14`, prev
+`$0E`) pins down one of the previously-unresolved "scripted trigger" feature codes. Segment `$12`'s
+ROM row stream is `$0E -> $14` (2 rows, `ROAD_PTR=$AD40`); segment `$13`'s is `$14 -> $15`
+(`ROAD_PTR=$AD42`, `main=$12`, `branch=$14`) — `$12` and `$13` are the documented **repeating
+road loop** between scripted events, and `$14` appears in both, i.e. every lap of the loop passes
+through a `$14` row.
+
+`ROAD_FEATURE=$14` is directly checked in the disassembly at `LA60E`
+(`disassembly/spyhunter.asm:3619-3663`):
+
+```
+lda ROAD_FEATURE
+cmp #$14
+beq LA62D          ; -> random spawn roll
+...
+LA62D:
+    jsr RNG_NEXT
+    cmp #$FA
+    bcc LA62C       ; ~97.7% of the time: nothing (RNG_NEXT < $FA -> rts)
+    jsr RNG_NEXT     ; ~2.3% chance: pick a spawn table + params
+    pha
+    cmp #$7F
+    lda #$09 : ldx #$A5 : ldy #$BB
+    bcc LA648
+    lda #$07 : ldx #$A5 : ldy #$98
+LA648:
+    sta FX_COUNT : stx FX_SRC_HI : sty FX_SRC   ; FX_SRC/HI -> $A5BB or $A598
+    ...                                          ; FX_LEN from further RNG
+```
+
+`FX_SRC`/`FX_SRC_HI` then feed `STREAM_PTR`, and the routine sets `BLIT_COL/BLIT_ROW/BLIT_WIDTH/
+BLIT_ROWS/OBJ_COLOR` — the same blit-parameter set used by `DRAW_OBJECT_TILES` (the shared
+van/smoke/hazard/text blitter, see the `spyhunter.asm` header). The two candidate source tables
+are small tile-code streams (`$A598`: `10 2B 2A 10 10 27 2C 28 ...`; `$A5BB`: `10 27 2A 10 10 10
+2B 2C 26 ...`, values in the `$10-$2C` tile-code range) — a compact shape blitted as map tiles,
+consistent with a small object graphic rather than a full sprite.
+
+So: **each pass through the `$12`/`$13` repeating water loop rolls a ~1-in-43 (`$FA`/`$100`≈2.3%)
+chance to spawn a random object** (one of two variants) via the standard tile blitter — matching
+`water-enemyboat-score14505`'s randomly-appeared enemy boat (`slot 2`, `TYPE=$13`, boat-mode flag
+`02 02 02` per above).
+
 ## Open item: does crashing into water cost a life?
 
 `become-boat` has `LIVES $4D15=$00`, `crash-into-water` has `LIVES $4D15=$01` — but the two
@@ -57,3 +116,9 @@ sequence. Can't conclude a life was lost from these two alone. Needs a same-sess
    candidate: a water-current/wake variant.
 5. Whether crashing into the water costs a life is unconfirmed (see above) — needs a paired
    snapshot capture in one continuous session.
+6. `OBJ_TBL63/6B/73` (all three set to `$02` together) is a shared boat/terrain-mode flag for NPC
+   object slots, confirmed across all three water snapshots.
+7. `ROAD_FEATURE $14` (in the repeating `$12`/`$13` water loop) is a ~2.3%-per-pass random spawn
+   trigger, traced directly in ROM at `LA60E`/`LA62D` — picks one of two small tile-blit shapes
+   (`$A598`/`$A5BB`) via `DRAW_OBJECT_TILES`'s blit parameters. This explains the randomly
+   encountered enemy boat in `water-enemyboat-score14505.vsf`.

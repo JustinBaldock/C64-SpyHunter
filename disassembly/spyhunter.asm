@@ -129,6 +129,14 @@
 ;        snapshots, including another bridge snapshot at HERO_STATE=$00) - no
 ;        per-enemy invincibility flag was found. Inconclusive from one snapshot; see
 ;        claude/Enemy_Invincibility_Notes.md.
+;     5. NPC boat state = OBJ_TBL63/6B/73 ($4D63/$4D6B/$4D73) all set to $02 for that
+;        slot (vs. $00 for ordinary road enemies) - a shared car/boat locomotion flag.
+;     6. ROAD_FEATURE $44=$14 (in the repeating segment $12/$13 water loop) is a
+;        traced RNG-gated random spawn: LA60E/LA62D roll ~2.3% (RNG>=$FA) per pass to
+;        blit one of two small tile shapes ($A598/$A5BB) via DRAW_OBJECT_TILES's
+;        blit params - confirmed by a randomly-encountered enemy boat (snapshot
+;        "water enemyboat"). Full 31-segment row-by-row graph now in
+;        claude/Road_Map_Decode.md.
 ;
 ; RUNTIME MEMORY MAP
 ;   $00-$01 6510 I/O port ($01=$05 run) ; $02-$04 high score BCD

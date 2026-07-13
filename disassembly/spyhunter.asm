@@ -581,20 +581,13 @@ KEYVAL_TBL = $AA23
 PAUSEKEY_TBL = $AA60
 SNDCMD_VEC_LO = $AB24
 SNDCMD_VEC_HI = $AB25
-ROAD_SEG_TBL = $AC17
-ROAD_PTR_LO_TBL = $AC57
-ROAD_PTR_HI_TBL = $AC76
-ROAD_LEN_TBL = $AC95
-ROAD_COLIDX_TBL = $ACB4
-ROAD_BORDER_TBL = $ACD3
-ROAD_MC1_TBL = $ACDC
-ROAD_MC2_TBL = $ACE5
-OBJ_ADDR_LO = $AD63
+; ROAD_SEG_TBL, ROAD_PTR_LO/HI_TBL, ROAD_LEN_TBL, ROAD_COLIDX/BORDER/MC1/
+; MC2_TBL, and OBJ_ADDR_LO/HI + OBJ_ROWREP_TBL/OBJ_SEGREP_TBL are all real
+; labels now (Stage 7 annotation pass), defined right at their ROM data -
+; see the road-tables block below, and claude/Road_Map_Decode.md for the
+; full decode. No equates needed for them here any more.
 OBJ_ADDR_LO2 = $AD64
-OBJ_ADDR_HI = $AD7D
 OBJ_ADDR_HI2 = $AD7E
-OBJ_ROWREP_TBL = $AD97
-OBJ_SEGREP_TBL = $ADB1
 INIT_CHARS_TBL = $BC6C
 SND_FREQ_LO_TBL = $BCBB
 SND_FREQ_HI_TBL = $BCBC
@@ -5194,37 +5187,94 @@ SID_WRITE_FREQ:
     ldy SND_TMP
     rts
 ; -----------------------------------------------------------------------
-; ROAD_SEG_TBL and its road palette / pointer sub-tables (ROAD_PTR_*/ROAD_*),
-; then the bulk graphics and audio data through $BFFF (charsets, sprite shapes,
-; screen layouts, SID music tables) - emitted verbatim from the ROM below.
+; ROAD_SEG_TBL: 32 x (main, branch) next-segment-id pairs - the road's
+; segment graph, fully decoded (all 31 segments, row-by-row) in
+; claude/Road_Map_Decode.md. Read by ADVANCE_ROAD_SEGMENT (Stage 6):
+; ROAD_SEG_TBL[2*current] = main (steer left), [2*current+1] = branch
+; (steer right, taken when SCENE_IDX >= $13).
+ROAD_SEG_TBL:
     .byte $1D,$1D,$02,$03,$08,$05,$06,$04,$07,$07,$07,$07,$07,$07,$10,$10
     .byte $09,$0E,$0A,$0A,$0B,$0B,$0C,$0C,$0D,$0D,$0F,$0F,$0F,$0F,$11,$11
     .byte $12,$0B,$12,$0B,$13,$13,$12,$14,$15,$17,$16,$16,$1A,$1A,$18,$18
     .byte $19,$19,$1A,$1A,$1B,$1B,$1C,$1C,$01,$01,$01,$1E,$01,$01,$01,$1D
+
+; ROAD_PTR_LO_TBL / ROAD_PTR_HI_TBL: per-segment pointer into the
+; feature-list bytes below (FEATURE_LISTS) - where each segment's row/
+; feature stream starts. 31 entries (segments $00-$1E).
+ROAD_PTR_LO_TBL:
     .byte $EE,$EF,$F2,$01,$11,$16,$1B,$1D,$20,$29,$2B,$2C,$2F,$30,$36,$39
-    .byte $3C,$3D,$40,$42,$44,$54,$55,$56,$58,$59,$5A,$5F,$60,$62,$62,$AC
-    .byte $AC,$AC,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD
-    .byte $AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$01,$03
+    .byte $3C,$3D,$40,$42,$44,$54,$55,$56,$58,$59,$5A,$5F,$60,$62,$62
+ROAD_PTR_HI_TBL:
+    .byte $AC,$AC,$AC,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD
+    .byte $AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD,$AD
+
+; ROAD_LEN_TBL: per-segment row count (how many rows to read from its
+; feature-list entry before advancing to the next segment).
+ROAD_LEN_TBL:
+    .byte $01,$03
     .byte $0F,$10,$05,$05,$02,$03,$09,$02,$01,$03,$01,$06,$03,$03,$01,$03
-    .byte $02,$02,$10,$01,$01,$02,$01,$01,$05,$01,$02,$01,$01,$00,$00,$00
+    .byte $02,$02,$10,$01,$01,$02,$01,$01,$05,$01,$02,$01,$01
+
+; ROAD_COLIDX_TBL / ROAD_BORDER_TBL / ROAD_MC1_TBL / ROAD_MC2_TBL: per-
+; segment palette. COLIDX combines with ROAD_PHASE (Stage 6,
+; APPLY_SEGMENT_PALETTE) to pick a row into the BORDER/MC1/MC2 colour
+; tables - this is what gives the bridge/water sections their distinct
+; look (claude/Water_Bridge_Notes.md).
+ROAD_COLIDX_TBL:
+    .byte $00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$04,$00,$04,$00,$00,$00,$04,$04,$00
-    .byte $00,$00,$00,$04,$00,$04,$00,$00,$04,$00,$08,$08,$0B,$0B,$0C,$0B
-    .byte $0B,$0B,$0C,$0B,$00,$05,$07,$0F,$07,$0F,$0F,$0F,$0F,$08,$07,$08
-    .byte $01,$08,$01,$01,$01,$01,$01,$11,$12,$09,$11,$12,$09,$08,$07,$04
-    .byte $06,$05,$10,$0B,$0A,$12,$09,$08,$10,$0C,$12,$09,$08,$07,$04,$06
-    .byte $05,$0B,$11,$08,$07,$04,$06,$05,$10,$0D,$07,$04,$06,$05,$0D,$07
-    .byte $04,$06,$05,$0D,$10,$0C,$13,$11,$08,$12,$09,$11,$0A,$12,$09,$08
-    .byte $10,$0C,$04,$0C,$02,$06,$05,$0F,$01,$07,$04,$06,$05,$06,$05,$06
-    .byte $05,$0D,$13,$11,$08,$02,$02,$03,$02,$14,$0E,$15,$14,$12,$09,$08
-    .byte $07,$04,$07,$04,$06,$05,$06,$05,$0B,$11,$08,$10,$0F,$0C,$01,$04
-    .byte $0D,$02,$07,$12,$09,$11,$08,$10,$00,$0A,$12,$19,$80,$20,$C0,$60
+    .byte $00,$00,$00,$04,$00,$04,$00,$00,$04,$00,$08,$08
+ROAD_BORDER_TBL:
+    .byte $0B,$0B,$0C,$0B
+    .byte $0B,$0B,$0C,$0B,$00
+ROAD_MC1_TBL:
+    .byte $05,$07,$0F,$07,$0F,$0F,$0F,$0F,$08
+ROAD_MC2_TBL:
+    .byte $07,$08
+    .byte $01,$08,$01,$01,$01,$01,$01
+
+; FEATURE_LISTS ($ACEE-$AD62): the per-segment row/feature byte streams
+; that ROAD_PTR_LO/HI_TBL point into - read backwards (dey-first) by
+; READ_ROAD_ROW (Stage 6). Every segment's exact row-by-row feature
+; sequence is fully decoded in claude/Road_Map_Decode.md's "Full segment
+; row-by-row table" - not re-split here byte-by-byte since that
+; cross-reference already gives the authoritative per-segment breakdown.
+FEATURE_LISTS:
+    .byte $11,$12,$09,$11,$12,$09,$08,$07,$04,$06,$05,$10,$0B,$0A,$12,$09
+    .byte $08,$10,$0C,$12,$09,$08,$07,$04,$06,$05,$0B,$11,$08,$07,$04,$06
+    .byte $05,$10,$0D,$07,$04,$06,$05,$0D,$07,$04,$06,$05,$0D,$10,$0C,$13
+    .byte $11,$08,$12,$09,$11,$0A,$12,$09,$08,$10,$0C,$04,$0C,$02,$06,$05
+    .byte $0F,$01,$07,$04,$06,$05,$06,$05,$06,$05,$0D,$13,$11,$08,$02,$02
+    .byte $03,$02,$14,$0E,$15,$14,$12,$09,$08,$07,$04,$07,$04,$06,$05,$06
+    .byte $05,$0B,$11,$08,$10,$0F,$0C,$01,$04,$0D,$02,$07,$12,$09,$11,$08
+    .byte $10,$00,$0A,$12,$19
+
+; OBJ_ADDR_LO/HI + OBJ_ROWREP_TBL/OBJ_SEGREP_TBL: the 16-entry ($00-$0F)
+; road-graphics table fully decoded in claude/Road_Map_Decode.md and
+; claude/Boat_River_Notes.md / Broken_Bridge_Notes.md - $01=bridge,
+; $02=boat/water crossing, $0F=broken-bridge return-to-road, etc. Indexed
+; by ROAD_FEATURE (READ_ROAD_ROW, Stage 6) to pick SCROLL_SRC + repeat
+; counts for each row.
+OBJ_ADDR_LO:
+    .byte $80,$20,$C0,$60
     .byte $C0,$40,$C0,$40,$C0,$40,$C0,$40,$C0,$A0,$80,$40,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$70,$29,$2A,$2A,$2B,$2B,$2F,$32,$36,$39,$3B
+    .byte $00,$00,$00,$00,$00,$70
+OBJ_ADDR_HI:
+    .byte $29,$2A,$2A,$2B,$2B,$2F,$32,$36,$39,$3B
     .byte $3D,$40,$41,$44,$47,$4A,$C0,$C2,$C3,$C4,$C8,$CC,$D0,$00,$00,$67
+OBJ_ROWREP_TBL:
     .byte $05,$05,$05,$03,$1C,$1C,$1C,$1C,$0C,$14,$14,$0C,$17,$17,$16,$16
-    .byte $10,$08,$08,$20,$20,$20,$01,$01,$01,$01,$14,$0F,$0A,$04,$01,$01
+    .byte $10,$08,$08,$20,$20,$20,$01,$01,$01,$01
+OBJ_SEGREP_TBL:
+    .byte $14,$0F,$0A,$04,$01,$01
     .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$0A,$1E,$0A,$01,$0A,$01
-    .byte $01,$01,$01,$1A,$36,$36,$01,$09,$37,$37,$39,$10,$02,$00,$80,$36
+    .byte $01,$01,$01,$1A
+
+; -----------------------------------------------------------------------
+; The bulk graphics and audio data through $BFFF (charsets, sprite shapes,
+; screen layouts, SID music tables) continues below, emitted verbatim from
+; the ROM - not individually catalogued in this annotation pass.
+    .byte $36,$36,$01,$09,$37,$37,$39,$10,$02,$00,$80,$36
     .byte $36,$01,$09,$37,$37,$39,$10,$02,$00,$80,$30,$36,$01,$09,$37,$31
     .byte $3B,$10,$02,$00,$80,$32,$33,$01,$09,$32,$33,$3D,$10,$02,$00,$80
     .byte $34,$36,$01,$09,$37,$35,$3F,$10,$02,$00,$80,$00,$00,$10,$07,$38

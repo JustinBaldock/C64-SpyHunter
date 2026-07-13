@@ -1,9 +1,19 @@
-# Spy Hunter - "enemy unshootable" (inconclusive, needs follow-up)
+# Spy Hunter - "enemy unshootable" (very likely explained: the Road Lord)
 
 From `spyhunter-enemy-unshootable.vsf` (score 10000, seg_idx `$0C` — the bridge segment, feature
 `$01`, prev `$06`). Extracted with the moving-object-table extension added to
 `tools/vsf_extract.py` this session (dumps `OBJ_TYPE`/`OBJ_ANIM`/`OBJ_TBL63`/`OBJ_TBL6B`/
 `OBJ_TBL73`/`OBJ_TBLB3`/`OBJ_TBLBB` for object slots 0-7).
+
+## Update: the official manual explains this
+
+`claude/Enemy_Agents_Manual_Reference.md` (extracted from `original_files/Spy_Hunter_1984_Sega_text.pdf`)
+documents six Enemy Agents, one of which - **the Road Lord** - is explicitly **bulletproof by
+design**: "Must be rammed off road by Spy Car," the manual's only enemy with no weapon of its own
+and no way to be shot down. That almost certainly *is* what this snapshot caught: not a bug, a
+transient hero state, or anything bridge-specific, just the intended behaviour of that one enemy
+type. The byte-level analysis below stands as evidence of what was captured, but the original
+"why is this happening" framing is superseded - see the reframed hypothesis at the end.
 
 ## What's confirmed
 
@@ -48,17 +58,24 @@ hit-detection against other slots.
 
 ## What's NOT confirmed
 
-- Which enemy (if any specific one) was the unshootable one — no per-slot "invincible" bit was
-  found; the only anomaly found is the *hero's* own state byte, not an enemy's.
-- Whether `HERO_STATE=$11` is the cause, a symptom, or unrelated coincidence. One hypothesis: a
-  transitional/grace-period hero state (distinct from both normal driving and the bridge's own
-  `$00` sub-state) that also suppresses hit-detection that frame — but this is speculation from a
-  single snapshot, not evidence.
+- Which of the two non-hero slots (`slot 2 TYPE=$0C`, `slot 6 TYPE=$05`) was the Road Lord, or
+  whether either was — no per-slot "invincible" bit exists in the disassembly (consistent with the
+  manual: it's not a flag, it's just that the Road Lord's code path never registers a hit,
+  presumably because collision/weapon-hit handling checks its `OBJ_TYPE` specifically and skips
+  it — not yet traced to the actual comparison in code).
+- **Revised hypothesis for `HERO_STATE=$11`:** given the manual says the Road Lord can *only* be
+  defeated by ramming, `$11` may be a ramming/collision sub-state rather than anything related to
+  the miss itself — i.e. this snapshot may have caught the moment the player rammed the Road Lord
+  (successfully or not), not a moment where a shot was fired and ignored. Still unconfirmed from a
+  single snapshot.
 
 ## Follow-up needed
 
-A same-session **paired capture** — one snapshot the instant an enemy fails to register a hit,
-and a second a frame or two before/after — would let a diff isolate what actually changes. A
-single isolated snapshot can only establish correlation candidates (as above), not causation;
-recorded here rather than guessed at further, per this project's own standard for open items
-(see the "open discrepancy" section previously resolved in `claude/Snapshot_Analysis.md`).
+- A same-session **paired capture** — one snapshot the instant an enemy fails to register a hit,
+  and a second a frame or two before/after — would let a diff isolate what actually changes.
+- Ideally, a snapshot with the Road Lord clearly visible/identifiable on screen at the moment of
+  interaction, to pin down which `OBJ_TYPE` value it actually is (see the "not yet mapped" section
+  in `claude/Enemy_Agents_Manual_Reference.md` for the broader enemy-type identification problem).
+- Locating the actual weapon-vs-enemy hit-detection code (not yet traced in this session) and
+  checking whether it special-cases the Road Lord's `OBJ_TYPE` would settle this definitively
+  without needing more snapshots.

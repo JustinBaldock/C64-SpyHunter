@@ -206,11 +206,16 @@
 ;        clean address progression and several ($11/$13/$14/$15) are separately
 ;        checked by CMP #imm branches (UPDATE_SCENE_SELECT and others) as
 ;        scene-transition triggers rather than plain tile indices.
-;     4. "Enemy unshootable" (near the bridge) is NOT yet explained: the only
-;        anomaly found is the hero's own HERO_STATE=$11 (unique among all captured
-;        snapshots, including another bridge snapshot at HERO_STATE=$00) - no
-;        per-enemy invincibility flag was found. Inconclusive from one snapshot; see
-;        claude/Enemy_Invincibility_Notes.md.
+;     4. "Enemy unshootable" (near the bridge) is VERY LIKELY just the Road Lord:
+;        the official manual (claude/Enemy_Agents_Manual_Reference.md, extracted
+;        from original_files/Spy_Hunter_1984_Sega_text.pdf) documents 6 Enemy
+;        Agents, one of which - the Road Lord - is explicitly bulletproof by
+;        design (must be rammed, not shot). Not a bug/hero-state fluke. The one
+;        byte anomaly found (hero's own HERO_STATE=$11, unique among all
+;        captured snapshots) may instead be a ramming/collision sub-state,
+;        caught mid-attempt against the Road Lord - unconfirmed, see
+;        claude/Enemy_Invincibility_Notes.md. Which OBJ_TYPE value IS the Road
+;        Lord (vs. the other 5 named agents vs. ordinary traffic) is still open.
 ;     5. NPC boat state = OBJ_TBL63/6B/73 ($4D63/$4D6B/$4D73) all set to $02 for that
 ;        slot (vs. $00 for ordinary road enemies) - a shared car/boat locomotion flag.
 ;     6. ROAD_FEATURE $44=$14 (in the repeating segment $12/$13 water loop) is a
@@ -4266,7 +4271,17 @@ LA88D:
     bpl LA88D
     brk
 ; -----------------------------------------------------------------------
-; POINTS_TBL_HI plus the score-event delta table.
+; POINTS_TBL_LO/HI: interleaved BCD (lo,hi) point-value pairs, read by
+; ADD_SCORE below (indexed by y=2*event, i.e. 2 bytes per entry). Confirmed
+; against the official manual (claude/Enemy_Agents_Manual_Reference.md) -
+; every value matches exactly: entry 0=0 (unused - note POINTS_TBL_LO's very
+; first byte, $A89D, is the preceding BRK instruction's own $00 opcode byte,
+; reused as data), 1=15 (water travel, pts/quarter-screen), 2=25 (road
+; travel), 3=150 (Road Lord/Switch Blade/Barrel Dumper - a shared "kill
+; tier", not one entry per enemy), 4=500 (Enforcer/Doctor Torpedo), 5=700
+; (The Copter), 6=1500 (boathouse land<->water transition). Whatever queues
+; SCORE_EVENT with these indices (not yet located) must map OBJ_TYPE down to
+; one of these 3 kill tiers on enemy destruction.
     .byte $00,$15,$00,$25,$00,$50,$01,$00,$05,$00,$07,$00,$15
 
 ; -----------------------------------------------------------------------

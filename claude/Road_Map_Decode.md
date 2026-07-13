@@ -203,6 +203,7 @@ second "return to road" on-ramp, opening (like segment `$0B`) on feature `$0F`. 
 * Feature `$10`'s exact meaning (segment `$08`) — no direct `CMP` site found yet.
 * Feature `$03` (the row between the two boat rows in segment `$11`) — likely a water
   current/wake variant, not yet visually confirmed.
-* What makes an enemy briefly unshootable near the bridge — see
-  `claude/Enemy_Invincibility_Notes.md` (inconclusive from a single snapshot; needs a paired
-  before/after capture).
+* Which `OBJ_TYPE` byte value is the Road Lord (the official manual explains WHY an enemy near
+  the bridge was unshootable — the Road Lord is bulletproof by design, see
+  `claude/Enemy_Agents_Manual_Reference.md` — but not yet WHICH byte value it is) — see
+  `claude/Enemy_Invincibility_Notes.md`.

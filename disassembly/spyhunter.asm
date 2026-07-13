@@ -95,6 +95,20 @@
 ;     3. TIMER_ENABLE $E3 stays $02 after expiry, so GAME_TIME keeps wrapping
 ;        past 0 (seen $9761) but is no longer drawn.
 ;
+;   ON-ROAD TEXT / "GAME OVER" (snapshot "game over"):
+;     1. On-road text ("GAME OVER", plus road signs) is drawn by DRAW_OBJECT_TILES
+;        - the SAME blitter as the van/smoke/hazards - as playfield MAP TILES,
+;        not sprites and not the status panel.
+;     2. Letters are 2-cell multicolour font-glyph pairs from charset $7000,
+;        mapped alphabetically: letter L -> ($CC+2L,$CD+2L) (A=$CC/$CD ... G=
+;        $D8/$D9 ... O=$E8/$E9 ... R=$EE/$EF ... Z=$FE/$FF).
+;     3. Message strings live in ROM at ONROAD_MSG_TBL ($A6E6), $00-separated:
+;        KEY/OR/JOY/OVER/GAME/ON/LEFT/DETOUR/OUT/BRIDGE/AHEAD/ROADS/ICY.  "GAME
+;        OVER" = GAME ($A700) drawn on screen row 10 over OVER ($A6F8) on row 11.
+;     4. Blitted into BOTH play buffers ($7800 and $7C00) so it survives the
+;        raster buffer-flip; the road scroll is frozen (SCROLL_SPEED=$00) on game
+;        over so the text overlays the road and stays put.
+;
 ; RUNTIME MEMORY MAP
 ;   $00-$01 6510 I/O port ($01=$05 run) ; $02-$04 high score BCD
 ;   $12-$2F working pointers            ; $34-$41 IRQ/raster split state
@@ -3235,9 +3249,10 @@ LA36E:
     rts
 
 ; -----------------------------------------------------------------------
-; Blit a multi-character object (car / weapons van / boat / smoke plume) into
-; the scrolling $7800 screen buffer + colour RAM (never the ROM/road template),
-; so blitted content becomes transient MAP tiles that scroll with the road.
+; Blit a multi-character object (car / weapons van / boat / smoke plume / the
+; on-road text messages from ONROAD_MSG_TBL, e.g. "GAME OVER") into the scrolling
+; $7800 screen buffer + colour RAM (never the ROM/road template), so blitted
+; content becomes MAP tiles that scroll with the road.
 ; The BLIT_FLAGS high-bit path (LA408+) widens the shape row-by-row = smoke plume.
 DRAW_OBJECT_TILES:
     ldx BLIT_ROWS
@@ -3662,14 +3677,36 @@ LA680:
     .byte $8E,$8E,$8E,$8E,$8E,$8E,$8E,$8E,$8F,$90,$91,$92,$93,$94,$00,$00
     .byte $00,$7A,$7B,$7C,$7D,$7E,$7F,$00,$80,$81,$82,$83,$84,$85,$86,$87
     .byte $88,$89,$8A,$8B,$8C,$8D,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $E0,$E1,$D4,$D5,$FC,$FD,$00,$E8,$E9,$EE,$EF,$00,$DE,$DF,$E8,$E9
-    .byte $FC,$FD,$E8,$E9,$F6,$F7,$D4,$D5,$EE,$EF,$D8,$D9,$CC,$CD,$E4,$E5
-    .byte $D4,$D5,$E8,$E9,$E6,$E7,$00,$00,$E2,$E3,$D4,$D5,$D6,$D7,$F2,$F3
-    .byte $00,$D2,$D3,$D4,$D5,$F2,$F3,$E8,$E9,$F4,$F5,$EE,$EF,$00,$00,$00
-    .byte $00,$00,$E8,$E9,$F4,$F5,$F2,$F3,$00,$00,$00,$00,$00,$CE,$CF,$EE
-    .byte $EF,$DC,$DD,$D2,$D3,$D8,$D9,$D4,$D5,$00,$CC,$CD,$DA,$DB,$D4,$D5
-    .byte $CC,$CD,$D2,$D3,$EE,$EF,$E8,$E9,$CC,$CD,$D2,$D3,$F0,$F1,$00,$00
-    .byte $DC,$DD,$D0,$D1,$FC,$FD,$00,$00,$E6,$86,$F8,$08,$40,$40,$A6,$A6
+; -----------------------------------------------------------------------
+; ONROAD_MSG_TBL: on-road/status message strings, drawn by DRAW_OBJECT_TILES
+; as blitted playfield tiles (NOT sprites/panel). Each letter is a 2-cell
+; multicolour font-glyph PAIR from charset $7000: letter L -> ($CC+2L,$CD+2L),
+; so A=$CC/$CD, G=$D8/$D9, O=$E8/$E9, R=$EE/$EF ... Z=$FE/$FF; $00 separates
+; words. 'GAME'($A700) over 'OVER'($A6F8) is the game-over text on the road.
+ONROAD_MSG_TBL:
+    .byte $E0,$E1,$D4,$D5,$FC,$FD    ; "KEY"
+    .byte $00    ; (word separator)
+    .byte $E8,$E9,$EE,$EF    ; "OR"
+    .byte $00    ; (word separator)
+    .byte $DE,$DF,$E8,$E9,$FC,$FD    ; "JOY"
+    .byte $E8,$E9,$F6,$F7,$D4,$D5,$EE,$EF    ; "OVER"  <- GAME OVER, screen row 11
+    .byte $D8,$D9,$CC,$CD,$E4,$E5,$D4,$D5    ; "GAME"  <- GAME OVER, screen row 10
+    .byte $E8,$E9,$E6,$E7    ; "ON"
+    .byte $00,$00    ; (word separator)
+    .byte $E2,$E3,$D4,$D5,$D6,$D7,$F2,$F3    ; "LEFT"
+    .byte $00    ; (word separator)
+    .byte $D2,$D3,$D4,$D5,$F2,$F3,$E8,$E9,$F4,$F5,$EE,$EF    ; "DETOUR"
+    .byte $00,$00,$00,$00,$00    ; (word separator)
+    .byte $E8,$E9,$F4,$F5,$F2,$F3    ; "OUT"
+    .byte $00,$00,$00,$00,$00    ; (word separator)
+    .byte $CE,$CF,$EE,$EF,$DC,$DD,$D2,$D3,$D8,$D9,$D4,$D5    ; "BRIDGE"
+    .byte $00    ; (word separator)
+    .byte $CC,$CD,$DA,$DB,$D4,$D5,$CC,$CD,$D2,$D3    ; "AHEAD"
+    .byte $EE,$EF,$E8,$E9,$CC,$CD,$D2,$D3,$F0,$F1    ; "ROADS"
+    .byte $00,$00    ; (word separator)
+    .byte $DC,$DD,$D0,$D1,$FC,$FD    ; "ICY"
+    .byte $00,$00    ; (word separator)
+    .byte $E6,$86,$F8,$08,$40,$40,$A6,$A6    ; FX_PARAM_E9.. (effect params)
     .byte $A6,$A7,$A7,$A7,$12,$20,$08,$0E,$0A,$0A,$01,$03,$02,$04,$03,$03
     .byte $0B,$04,$10,$0D,$07,$17
 

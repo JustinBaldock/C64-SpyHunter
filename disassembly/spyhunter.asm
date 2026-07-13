@@ -1144,9 +1144,10 @@ INIT_PLAY_MUX:
 
 ; Pick which game-state handler VEC_STATE should dispatch to (via
 ; GAME_DISPATCH, every frame) for the game that's about to start - one of
-; three addresses depending on GAME_STATE/NUM_PLAYERS. The handlers
-; themselves ($A189/$A152/$A9F6) live in a later part of the ROM not covered
-; by this stage. (???)
+; three addresses depending on GAME_STATE/NUM_PLAYERS. $A189/$A152 aren't
+; covered by this annotation pass; $A9F6 is STATE_2P_ENTRY (Stage 8, near
+; SCAN_JOY_KEYS) - a 2-player-specific input-decode entry point. (???: the
+; other two handlers' roles)
     lda #$89
     ldy #$A1
     ldx GAME_STATE
@@ -1156,7 +1157,7 @@ INIT_PLAY_MUX:
     beq ONE_PLAYER_VEC       ; NUM_PLAYERS=1 -> $A152
     lda #$F6
     ldy #$A9
-    bne SET_STATE_VEC         ; NUM_PLAYERS=2 -> $A9F6
+    bne SET_STATE_VEC         ; NUM_PLAYERS=2 -> $A9F6 (STATE_2P_ENTRY)
 
 ONE_PLAYER_VEC:
     lda #$52
@@ -2736,7 +2737,11 @@ INIT_OBJECT_SLOT:
     .byte $66,$A8
 
 ; -----------------------------------------------------------------------
-; Start the 3-voice "Peter Gunn" theme.
+; Start the 3-voice "Peter Gunn" theme: silence everything, then request
+; sound-effect index $02 on voice 1, $04 on the "voice 0B" queue, and $06 on
+; voice 2 - three simultaneous SOUND_REQ_* calls kick off the three SID
+; voices' independent note sequences (see MUSIC_DRIVER further down for how
+; a queued request turns into actual SID register writes).
 MUSIC_START_THEME:
     jsr SOUND_SILENCE
     ldy #$02
@@ -2746,7 +2751,12 @@ MUSIC_START_THEME:
     ldy #$06
     jmp SOUND_REQ_V2
 ; -----------------------------------------------------------------------
-; More state handlers and jump tables (UPDATE_SCENE_SELECT family), as data.
+; More per-object-type/hero state-machine handler CODE stored as raw data -
+; the same situation as the two blocks noted in Stage 5 (PROCESS_OBJECTS/
+; INIT_OBJECT_SLOT): only reachable indirectly via the ZVEC_MOVE/ZVEC_DRAW/
+; VEC_STATE dispatch vectors, so a straight-line disassembly never picks it
+; up as code. This is the largest such block in the file (~1650 bytes) -
+; left unexpanded for a future focused session, same as its counterparts.
     .byte $A5,$D7,$C9,$23,$90,$04,$C9,$DC,$90,$03,$EE,$89,$4D,$A5,$33,$4A
     .byte $90,$1D,$A9,$07,$CE,$0E,$4D,$10,$03,$8D,$0E,$4D,$A4,$B0,$10,$04
     .byte $AD,$0E,$4D,$0A,$38,$ED,$0E,$4D,$A8,$B9,$9A,$93,$20,$DB,$99,$4C
@@ -4680,43 +4690,65 @@ LA8DD:
 
 LA8FB:
     cld
-    ldx #$E0
+    ldx #$E0            ; SCORE_LO's address - see the shared-entry note below
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
 ; -----------------------------------------------------------------------
-; Render the BCD score digits into the status-panel screen rows.
+; Render the BCD score digits into the status-panel screen rows, reading
+; from a small zero-page pointer (SRC_PTR/SRC_PTR_HI) that's deliberately
+; set to a tiny value (not a real 16-bit address) so that "(SRC_PTR),y"
+; ends up reading directly from zero page address SRC_PTR+y - a compact way
+; to walk 3 (or 4) consecutive zero-page bytes with one indirect-indexed
+; addressing mode instead of several absolute-addressed instructions.
+;
+; TWO different entry points share this one routine:
+;  - DRAW_SCORE itself (SRC_PTR=$0002=HISCORE_LO): draws the HIGH score.
+;  - The fall-through from ADD_SCORE just above (SRC_PTR=$00E0=SCORE_LO,
+;    via the BIT-skip trick - ADD_SCORE's "ldx #$E0" survives into here
+;    because the skip-2 jumps straight past DRAW_SCORE's own "ldx #$02"):
+;    draws the CURRENT score instead. One shared digit-renderer, two
+;    different score buffers, selected by how you enter it.
 DRAW_SCORE:
     ldx #$02
     stx SRC_PTR
     ldx #$00
     stx SRC_PTR_HI
-    lda #$F0
-    sta ZTMP_08
+    lda #$F0            ; ZTMP_08 = a nibble mask, starting at the high
+    sta ZTMP_08           ;   nibble of the most-significant byte
     ldy #$02
     lda SCORE_OVFL
-    bne LA927
-    iny
+    bne DIGIT_SCAN_ENTRY  ; SCORE_OVFL nonzero -> there's a 4th ("millions")
+    iny                    ;   byte to consider too, so start one further out
 
-LA912:
+; Skip leading-zero DIGITS (not just bytes): walk from the most significant
+; nibble down, checking "byte AND mask"; while it's still zero, blank that
+; digit position (inx inx, skip 2 panel cells) and flip the mask between
+; $F0/$0F (i.e. move to the other nibble of the same byte) via EOR #$FF,
+; only moving to the PREVIOUS byte (dey) once both its nibbles were checked.
+DIGIT_SKIP_LOOP:
     dey
 
-LA913:
+DIGIT_SKIP_CHECK:
     lda (SRC_PTR),y
     and ZTMP_08
-    bne LA927
+    bne DIGIT_SCAN_ENTRY   ; found the first nonzero nibble -> start drawing
     inx
     inx
     lda ZTMP_08
     eor #$FF
     sta ZTMP_08
-    bmi LA912
+    bmi DIGIT_SKIP_LOOP    ; mask is back to $F0 -> that byte's done, move on
     cpy #$00
-    bne LA913
+    bne DIGIT_SKIP_CHECK
 
-LA927:
+; Draw every remaining digit (both nibbles of each remaining byte, from
+; here down to the last byte) - entering at DIGIT_LOW_NIBBLE directly (via
+; LSR/BCS) if the mask says only the low nibble of the CURRENT byte still
+; needs drawing (i.e. we just arrived here mid-byte from the skip loop).
+DIGIT_SCAN_ENTRY:
     lsr ZTMP_08
-    bcs LA934
+    bcs DIGIT_LOW_NIBBLE
 
-LA92B:
+DIGIT_HIGH_NIBBLE:
     lda (SRC_PTR),y
     lsr a
     lsr a
@@ -4724,16 +4756,21 @@ LA92B:
     lsr a
     jsr PANEL_PUT_DIGIT
 
-LA934:
+DIGIT_LOW_NIBBLE:
     lda (SRC_PTR),y
     and #$0F
     jsr PANEL_PUT_DIGIT
     dey
-    bpl LA92B
+    bpl DIGIT_HIGH_NIBBLE
     rts
 
 ; -----------------------------------------------------------------------
-; PANEL_PUT_DIGIT/PANEL_PUT_CHAR_PAIR: write a 2-char cell pair into the panel.
+; PANEL_PUT_DIGIT: convert a 0-9 digit value to its double-height panel
+; character pair ($60+2N/$61+2N, see claude/Snapshot_Analysis.md) and fall
+; into PANEL_PUT_CHAR_PAIR, which writes any char code + its +1 neighbour
+; into both panel screen rows (PANEL_SCR0/PANEL_SCR1) at column X, advancing
+; X by 2 - the shared "write one double-wide panel cell" primitive used
+; throughout this whole section (score digits, icons, timer, lives).
 PANEL_PUT_DIGIT:
     asl a
     clc
@@ -4750,88 +4787,118 @@ PANEL_PUT_CHAR_PAIR:
     inx
     rts
 
-LA955:
+; Timer entry point: point SRC_PTR at GAME_TIME_LO/HI ($4D01) - a REAL 16-bit
+; pointer this time (SRC_PTR_HI isn't zeroed here, unlike DRAW_SCORE's zero-
+; page trick) - then jump straight into DIGIT_LOW_NIBBLE to draw just
+; GAME_TIME_HI's low nibble (its high nibble is always 0 - the timer only
+; ever needs 3 decimal digits total for a 0-999 range), then fall through
+; (dey/bpl) to draw both nibbles of GAME_TIME_LO - giving exactly 3 digits.
+DRAW_TIMER:
     ldy #$01
     sty SRC_PTR
     ldy #$4D
     sty SRC_PTR_HI
     ldy #$01
-    ldx #$14
-    bne LA934
+    ldx #$14            ; panel column $14 (centre)
+    bne DIGIT_LOW_NIBBLE   ; (unconditional - Y was just set to 1)
 ; -----------------------------------------------------------------------
-; PANEL_ICON_TBL: status-panel indicator icon char-codes.
+; PANEL_ICON_TBL: status-panel indicator icon char-codes (weapon/fuel).
     .byte $80,$82,$84,$86
 
 ; -----------------------------------------------------------------------
 ; Draw the panel indicators: weapon/fuel icons, then EITHER the game timer
-; (LA955, when EXTRA_LIFE_AVAIL=$00) OR the lives markers (when EXTRA_LIFE_AVAIL
-; =$FF, i.e. the timer has expired) - which is why the timer vanishes at 0.
+; (DRAW_TIMER, when EXTRA_LIFE_AVAIL=$00) OR the lives markers (when
+; EXTRA_LIFE_AVAIL=$FF, i.e. the timer has expired) - which is why the timer
+; vanishes at 0 (see the header's "timer gone" notes).
 DRAW_STATUS_PANEL:
     ldx #$1C
     stx PANEL_X
     ldy #$00
 
-LA96D:
+; Draw up to 4 ammo/weapon icons (GUN_HEAT/MISSILE_CNT/SMOKE_CNT and a 4th
+; slot): blank ($40) if that ammo counter is 0, otherwise the matching
+; PANEL_ICON_TBL icon.
+DRAW_ICONS_LOOP:
     lda a:GUN_HEAT,y
-    beq LA977
+    beq ICON_BLANK
     lda PANEL_ICON_TBL,y
-    bne LA979
+    bne ICON_DRAW
 
-LA977:
+ICON_BLANK:
     lda #$40
 
-LA979:
+ICON_DRAW:
     jsr PANEL_PUT_CHAR_PAIR
     inx
     iny
     cpy #$04
-    bne LA96D
+    bne DRAW_ICONS_LOOP
     lda EXTRA_LIFE_AVAIL
-    beq LA955
+    beq DRAW_TIMER
     ldx #$0E
     lda #$06
-    sta ZTMP_08
+    sta ZTMP_08         ; draw up to 6 life-icon cells
     ldy LIVES
-    bmi LA9A0
+    bmi PANEL_DONE       ; LIVES=$FF (game-over sentinel) -> draw nothing
 
-LA992:
+; Draw one filled ($88) life icon per remaining life, then blanks ($40) for
+; the rest of the 6 cells.
+DRAW_LIVES_LOOP:
     lda #$88
     dey
-    bpl LA999
+    bpl LIVES_ICON_DRAW
     lda #$40
 
-LA999:
+LIVES_ICON_DRAW:
     jsr PANEL_PUT_CHAR_PAIR
     dec ZTMP_08
-    bne LA992
+    bne DRAW_LIVES_LOOP
 
-LA9A0:
+PANEL_DONE:
     rts
 
 ; -----------------------------------------------------------------------
-; Scan the CIA1 keyboard/joystick matrix and return a key/joystick code.
+; Scan the CIA1 keyboard/joystick matrix and return a key/joystick code in
+; A. This uses the classic C64 matrix-scan technique: CIA1_PRA drives one
+; "column" line low at a time (via ROL, walking a single 0 bit through the
+; port each pass - the same repeat-N-times-without-a-counter idiom seen
+; elsewhere, here also doubling as the column-select signal itself) while
+; CIA1_PRB reads back which "row" lines respond - a pressed key/direction
+; pulls its row line low, showing up as a 0 bit once inverted (EOR #$FF).
+;
+; This first loop only checks the joystick port's 5 lines (up/down/left/
+; right/fire, reached by stepping X down by 8 each pass - not a real
+; keyboard column scan yet, just probing the joystick-shaped subset of the
+; matrix); if nothing shows up there, KEYBOARD_SCAN_LOOP below does a fuller
+; keyboard-column scan.
 SCAN_JOY_KEYS:
     lda #$FF
-    sta CIA1_DDRA
+    sta CIA1_DDRA       ; CIA1 port A = all outputs (so we can drive columns)
     lda #$FE
-    sta CIA1_PRA
+    sta CIA1_PRA        ; start with only bit 0 low (select first column)
     lda #$3F
     sec
 
-LA9AE:
+JOY_PROBE_LOOP:
     sbc #$08
     tax
     lda CIA1_PRB
-    rol CIA1_PRA
+    rol CIA1_PRA        ; walk the driven-low bit to the next column
     eor #$FF
-    bne LA9C0
+    bne KEYBOARD_SCAN_LOOP   ; a row line responded -> go decode which one
 
-LA9BB:
+JOY_PROBE_NEXT:
     txa
-    bcs LA9AE
-    bcc LA9F2
+    bcs JOY_PROBE_LOOP
+    bcc NOTHING_PRESSED
 
-LA9C0:
+; A row responded: temporarily switch CIA1_PRA to read-all-lines mode ($FF)
+; to check whether this is a genuine single-line response or PRB is
+; floating/all-lines-active (some CIA matrix wiring needs this extra check
+; to disambiguate a real keypress from crosstalk); if PRB still reads all
+; zero-bits-inverted-to-zero (beq), treat it as confirmed and decode below,
+; otherwise restore state and keep scanning.
+KEYBOARD_SCAN_LOOP:
     php
     pha
     txa
@@ -4842,16 +4909,18 @@ LA9C0:
     sta CIA1_PRA
     lda CIA1_PRB
     eor #$FF
-    beq LA9DF
+    beq KEY_CONFIRMED
     pla
     sta CIA1_PRA
     pla
     tax
     pla
     plp
-    jmp LA9BB
+    jmp JOY_PROBE_NEXT
 
-LA9DF:
+; Confirmed: restore saved state and count which BIT position in A
+; responded (INX/ROL loop) - that bit index becomes the returned key code.
+KEY_CONFIRMED:
     pla
     sta CIA1_PRA
     pla
@@ -4859,40 +4928,50 @@ LA9DF:
     pla
     plp
 
-LA9E7:
+COUNT_KEY_BIT:
     inx
     rol a
-    bcc LA9E7
+    bcc COUNT_KEY_BIT
 
-LA9EB:
+SCAN_DONE:
     lda #$00
-    sta CIA1_DDRA
+    sta CIA1_DDRA       ; restore CIA1 port A to input (release the matrix)
     txa
     rts
 
-LA9F2:
+NOTHING_PRESSED:
     ldx #$00
-    beq LA9EB
+    beq SCAN_DONE       ; (always taken - X was just set to 0) so everything
+                        ;   below is unreachable from here; it's a SEPARATE
+                        ;   entry point, reached only via VEC_STATE (see
+                        ;   SET_STATE_VEC, Stage 2: this is the $A9F6 handler
+                        ;   selected for 2-player games)
+STATE_2P_ENTRY:
     lda #$00
     ldx #$03
 
-LA9FA:
+; Decoded joystick/key reader: clear the 4-entry JOY_STATE array, take one
+; raw scan (SCAN_JOY_KEYS above), then look the result up in KEYCODE_TBL -
+; on a match, KEYVAL_TBL/KEYIDX_TBL say what value to store into which
+; JOY_STATE slot (translating a raw matrix code into this game's own
+; decoded joystick-direction/button representation).
+DECODE_JOY_LOOP:
     sta JOY_STATE,x
     dex
-    bpl LA9FA
+    bpl DECODE_JOY_LOOP
     jsr SCAN_JOY_KEYS
     ldx #$06
 
-LAA05:
+MATCH_KEYCODE_LOOP:
     dex
-    bmi LAA16
+    bmi DECODE_JOY_DONE
     cmp KEYCODE_TBL,x
-    bne LAA05
+    bne MATCH_KEYCODE_LOOP
     lda KEYVAL_TBL,x
     ldy KEYIDX_TBL,x
     sta JOY_STATE,y
 
-LAA16:
+DECODE_JOY_DONE:
     rts
 ; -----------------------------------------------------------------------
 ; KEYCODE_TBL / KEYIDX_TBL / KEYVAL_TBL: console-key scan decode tables.
@@ -4900,47 +4979,56 @@ LAA16:
     .byte $FF,$FF
 
 ; -----------------------------------------------------------------------
-; Read the pause/mute console keys, debounce, toggle freeze/mute.
+; Read the pause/mute console keys, debounce, toggle freeze/mute. Watches 3
+; keys (PAUSEKEY_TBL) in parallel, each with its own KEY_LAST/KEY_DEBOUNCE/
+; KEY_TOGGLE slot; only KEY_TOGGLE[0] (the pause key) is actually acted on
+; here (freezing SCROLL_SPEED and silencing sound) - the other two toggles
+; are presumably read elsewhere (candidate: mute-only, not confirmed). (???)
 HANDLE_PAUSE_KEYS:
     lda SCROLL_SPEED
-    pha
+    pha                 ; stash the current scroll speed to restore on resume
 
-LAA2C:
+PAUSE_POLL_LOOP:
     jsr SCAN_JOY_KEYS
-    ldx #$02
+    ldx #$02            ; check all 3 watched keys each pass
 
-LAA31:
+; Debounced toggle: if this frame's scanned code matches PAUSEKEY_TBL[x] AND
+; differs from what it was last frame (a fresh press, not still-held), start
+; (or continue) a 10-frame debounce countdown; only once that countdown
+; reaches 0 does KEY_TOGGLE[x] actually flip. This is the standard "ignore
+; key-repeat, act once per distinct press" pattern.
+PAUSE_KEY_CHECK:
     tay
     cmp PAUSEKEY_TBL,x
-    bne LAA45
+    bne PAUSE_KEY_MISS
     cmp KEY_LAST,x
-    beq LAA47
+    beq PAUSE_DEBOUNCE_RESET
     dec KEY_DEBOUNCE,x
-    bne LAA4B
+    bne PAUSE_KEY_NEXT
     lda KEY_TOGGLE,x
     eor #$FF
     sta KEY_TOGGLE,x
 
-LAA45:
+PAUSE_KEY_MISS:
     sty KEY_LAST,x
 
-LAA47:
+PAUSE_DEBOUNCE_RESET:
     ldy #$0A
     sty KEY_DEBOUNCE,x
 
-LAA4B:
+PAUSE_KEY_NEXT:
     dex
-    bpl LAA31
+    bpl PAUSE_KEY_CHECK
     lda KEY_TOGGLE
-    beq LAA5C
+    beq PAUSE_RESUME
     lda #$00
-    sta SCROLL_SPEED
-    jsr SOUND_SILENCE
-    jmp LAA2C
+    sta SCROLL_SPEED    ; paused: freeze the road scroll...
+    jsr SOUND_SILENCE    ; ...and mute all sound
+    jmp PAUSE_POLL_LOOP   ; keep polling every frame until un-paused
 
-LAA5C:
+PAUSE_RESUME:
     pla
-    sta SCROLL_SPEED
+    sta SCROLL_SPEED    ; not paused (any more): restore the saved scroll speed
     rts
 ; -----------------------------------------------------------------------
 ; PAUSEKEY_TBL: the three key scan codes HANDLE_PAUSE_KEYS watches.
@@ -4953,38 +5041,58 @@ SID_INIT:
     lda #$00
     ldx #$18
 
-LAA6A:
+CLEAR_SID_LOOP:
     sta SID_V1_FLO,x
     dex
-    bpl LAA6A
+    bpl CLEAR_SID_LOOP
     lda #$0F
     sta SID_VOL
     rts
 
 ; -----------------------------------------------------------------------
-; Request sound sequence Y on a SID voice.
+; Request sound sequence Y (an index into SND_SEQPTR_LO/HI, the per-effect
+; sequence-pointer table) on a SID voice. Four entry points, one per voice
+; (0, "0B", 1, 2) - but only SOUND_REQ_V0 actually checks whether its voice
+; is busy first (SND_SEQ nonzero -> already playing something, bail via
+; RTS). SOUND_REQ_V0B/V1/V2 jump straight into the shared queue code
+; (QUEUE_SOUND_REQ) unconditionally.
+;
+; Worth calling out: the "lda SND_SEQ_V1 / bne ..." and "lda SND_SEQ_V2 /
+; bne ..." lines below are UNREACHABLE dead code - the branch just above
+; each one (BEQ with A just loaded as an immediate #$00, or BNE with A as a
+; nonzero immediate) is unconditional, so control always jumps past them
+; into QUEUE_SOUND_REQ. This looks like a leftover from an earlier version
+; of the code where every voice had its own busy-check (like SOUND_REQ_V0
+; still does) before being simplified - the dead bytes were left in place
+; rather than removed. Confirmed by direct reading, not a guess.
 SOUND_REQ_V0:
     lda SND_SEQ
-    bne LAAA7
+    bne SOUND_REQ_DONE
 
 SOUND_REQ_V0B:
     lda #$00
-    beq LAA8C
-    lda SND_SEQ_V1
-    bne LAAA7
+    beq QUEUE_SOUND_REQ  ; (unconditional - A is always 0 here)
+    lda SND_SEQ_V1        ; unreachable (see note above)
+    bne SOUND_REQ_DONE
 
 SOUND_REQ_V1:
     lda #$01
-    bne LAA8C
-    lda SND_SEQ_V2
-    bne LAAA7
+    bne QUEUE_SOUND_REQ  ; (unconditional - A is always 1, nonzero)
+    lda SND_SEQ_V2        ; unreachable (see note above)
+    bne SOUND_REQ_DONE
 
 SOUND_REQ_V2:
-    lda #$02
+    lda #$02            ; falls straight into QUEUE_SOUND_REQ below
 
-LAA8C:
-    stx ZTMP_08
-    tax
+; Reset the chosen voice's playback state (SND_SEQ/SND_POS/SND_SLIDE_HI=0,
+; SND_DUR=1) and load its new sequence pointer from SND_SEQPTR_LO/HI,y.
+; Storing the sequence's HIGH byte back into SND_SEQ,x (after having just
+; zeroed it) is doing double duty: it's both part of the pointer AND the
+; nonzero "this voice is busy" flag SOUND_REQ_V0 checks above (a real ROM/
+; RAM high byte is never 0).
+QUEUE_SOUND_REQ:
+    stx ZTMP_08         ; save caller's X (not the voice index - see below)
+    tax                 ; X = voice index (0/1/2, from A above)
     lda #$00
     sta SND_SEQ,x
     sta SND_POS,x
@@ -4995,13 +5103,14 @@ LAA8C:
     sta SND_PTR0_LO,x
     lda SND_SEQPTR_HI,y
     sta SND_SEQ,x
-    ldx ZTMP_08
+    ldx ZTMP_08         ; restore caller's X
 
-LAAA7:
+SOUND_REQ_DONE:
     rts
 
 ; -----------------------------------------------------------------------
-; Gate off all three SID voices.
+; Gate off all three SID voices (silences sound immediately) and clear all
+; 3 voices' SND_SEQ "busy" flags, so any in-flight SOUND_REQ_* is abandoned.
 SOUND_SILENCE:
     txa
     pha
@@ -5012,31 +5121,46 @@ SOUND_SILENCE:
     lda #$00
     ldx #$02
 
-LAAB9:
+CLEAR_VOICE_SEQ_LOOP:
     sta SND_SEQ,x
     dex
-    bpl LAAB9
+    bpl CLEAR_VOICE_SEQ_LOOP
     pla
     tax
     rts
 
 ; -----------------------------------------------------------------------
-; Per-frame SID player (called from the IRQ).
+; Per-frame SID player (called once per frame from the IRQ, via
+; IRQ_MAIN_TAIL - Stage 3). Drives all 3 SID voices independently, each
+; voice running its own little bytecode "program": a byte stream of notes,
+; durations and commands (jumps/loops/etc, dispatched through
+; SNDCMD_VEC_LO/HI below) that MUSIC_START_THEME and SOUND_REQ_* point a
+; voice at. This is the least-explored area of the file - the overall
+; sequencer structure below is traced with reasonable confidence, but some
+; of the frequency-slide (portamento) arithmetic is marked (???).
 MUSIC_DRIVER:
     lda #$0E
-    sta SND_REGOFS
-    ldx #$02
+    sta SND_REGOFS      ; SID register offset: $0E/$07/$00 = voice 3/2/1's
+                        ;   7-register block ($D400+SND_REGOFS)
+    ldx #$02            ; voice index 2, 1, 0 (SND_* arrays are per-voice)
 
-LAAC7:
+VOICE_LOOP:
     stx SND_VOICE
     ldy SND_POS,x
     lda SND_SEQ,x
-    beq LAAF6
-    sta SND_SEQ_PTR_HI
+    beq VOICE_ADVANCE   ; SND_SEQ=0 -> nothing queued on this voice, skip it
+    sta SND_SEQ_PTR_HI  ; SND_SEQ,x doubles as the sequence pointer's high
+                        ;   byte (see the note in QUEUE_SOUND_REQ above)
     lda SND_PTR0_LO,x
     sta SND_SEQ_PTR
     cpy #$00
-    bne LAAF2
+    bne DUR_COUNTDOWN   ; position already advanced past the header -> skip
+                        ;   the one-time envelope setup below
+
+; Fresh sequence (position still 0): its first 3 bytes are an ADSR/control
+; setup, written straight to this voice's SID registers (sustain/release,
+; attack/decay, then control - order matches the SID_V1_SR/AD/CTRL
+; equates), then the read position is set to 3, past this header.
     lda (SND_SEQ_PTR),y
     pha
     iny
@@ -5052,33 +5176,46 @@ LAAC7:
     sta SID_V1_CTRL,y
     ldy #$03
 
-LAAF2:
+; Count down this voice's note-duration timer; once it hits 0, the current
+; note/command is finished and it's time to read the next one (PROCESS_STEP).
+DUR_COUNTDOWN:
     dec SND_DUR,x
-    beq LAB03
+    beq PROCESS_STEP
 
-LAAF6:
+; Move on to the next voice (register offset steps back by 7 per voice).
+VOICE_ADVANCE:
     sty SND_POS,x
     lda SND_REGOFS
     sec
     sbc #$07
     sta SND_REGOFS
     dex
-    bpl LAAC7
+    bpl VOICE_LOOP
     rts
 
-LAB03:
+; Duration expired: if a frequency slide (portamento) is in progress
+; (SND_SLIDE_HI nonzero), continue it (APPLY_SLIDE); otherwise read the
+; next token from the sequence stream.
+PROCESS_STEP:
     lda SND_SLIDE_HI,x
-    beq LAB0A
-    jmp LABBC
+    beq READ_NEXT_TOKEN
+    jmp APPLY_SLIDE
 
-LAB0A:
+; A $00 token means "the next byte is a COMMAND index" (DISPATCH_COMMAND);
+; any other value is itself a note to play (PLAY_NOTE).
+READ_NEXT_TOKEN:
     lda (SND_SEQ_PTR),y
     iny
     cmp #$00
-    beq LAB14
-    jmp LAB90
+    beq DISPATCH_COMMAND
+    jmp PLAY_NOTE
 
-LAB14:
+; Look up a command handler in SNDCMD_VEC_LO/HI (indexed by the command
+; byte x2) and jump to it via the classic 6502 "push address-1, then RTS"
+; indirect-jump trick - the handler runs and its own RTS returns to
+; whatever called MUSIC_DRIVER, not back here (the handler is responsible
+; for its own control flow, e.g. looping the sequence or continuing on).
+DISPATCH_COMMAND:
     lda (SND_SEQ_PTR),y
     iny
     asl a
@@ -5090,7 +5227,13 @@ LAB14:
     ldx SND_VOICE
     rts
 ; -----------------------------------------------------------------------
-; SNDCMD_VEC_LO/HI plus the music command-handler code, as data.
+; SNDCMD_VEC_LO/HI (the command-handler address table DISPATCH_COMMAND
+; reads) plus the music command-handler CODE itself, stored as raw data -
+; the same "only reached indirectly" situation as the blocks noted in
+; Stage 5/9 (PROCESS_OBJECTS, MUSIC_START_THEME's data block). Candidate
+; commands based on what a music sequencer typically needs: loop/repeat,
+; jump to a different sequence, tempo/rate change - not individually
+; decoded in this pass.
     .byte $29,$AB,$38,$AB,$7A,$AB,$A9,$00,$95,$55,$A8,$A6,$4C,$9D,$04,$D4
     .byte $A6,$4B,$4C,$F6,$AA,$B1,$50,$C8,$29,$1F,$0A,$AA,$BD,$BB,$BC,$85
     .byte $4D,$BD,$BC,$BC,$85,$4E,$20,$04,$AC,$A5,$4D,$95,$61,$A5,$4E,$95
@@ -5099,7 +5242,15 @@ LAB14:
     .byte $95,$6A,$95,$58,$4C,$F6,$AA,$B1,$50,$C8,$95,$52,$48,$B1,$50,$C8
     .byte $95,$55,$85,$51,$68,$85,$50,$A0,$00,$4C,$03,$AB
 
-LAB90:
+; Play a note: the byte just read packs a 6-bit note index (bits 0-5, look
+; up its frequency in SND_FREQ_LO/HI_TBL and write it to the SID via
+; SID_WRITE_FREQ) AND a 2-bit duration class in its TOP two bits (re-read
+; via "dey/lda/iny" - stepping back to re-examine the SAME byte - then
+; rotated down via 3x ROL). Duration class 0 means "read one more explicit
+; duration byte from the stream"; classes 1-3 look up a preset duration
+; from SND_DUR_TBL instead - short/common durations cost 0 extra bytes,
+; unusual ones cost 1.
+PLAY_NOTE:
     and #$3F
     asl a
     tax
@@ -5118,64 +5269,77 @@ LAB90:
     tax
     lda SND_DUR_TBL,x
     cpx #$00
-    bne LABB5
+    bne SET_DURATION
     lda (SND_SEQ_PTR),y
     iny
 
-LABB5:
+SET_DURATION:
     ldx SND_VOICE
     sta SND_DUR,x
-    jmp LAAF6
+    jmp VOICE_ADVANCE
 
-LABBC:
+; Continue an in-progress frequency slide (portamento): step SND_FREQ_LO,x
+; by SND_SLIDE_LO,x each frame (the slide "rate", signed - SLIDE_DOWN below
+; handles the negative-rate case), write the new frequency, and check
+; against the SND_TGT_LO/HI target to know when the slide is complete.
+; (???: SND_SLIDE_HI's exact role - both "is a slide active" flag, per
+; PROCESS_STEP's check above, and part of the stepped value here - isn't
+; fully disentangled.)
+APPLY_SLIDE:
     clc
     lda SND_SLIDE_LO,x
-    bmi LABE3
+    bmi SLIDE_DOWN
     adc SND_FREQ_LO,x
     sta SND_FREQ_LO,x
     sta SND_PTR_LO
-    bcc LABCB
+    bcc SLIDE_UP_CHECK
     inc SND_SLIDE_HI,x
 
-LABCB:
+SLIDE_UP_CHECK:
     lda SND_SLIDE_HI,x
     sta SND_PTR_HI
     cmp SND_TGT_LO,x
-    bcc LABD9
+    bcc SLIDE_CONTINUE
     lda SND_FREQ_LO,x
     cmp SND_TGT_HI,x
-    bcs LABFD
+    bcs SLIDE_DONE
 
-LABD9:
+SLIDE_CONTINUE:
     jsr SID_WRITE_FREQ
     lda SND_RATE,x
     sta SND_DUR,x
-    jmp LAAF6
+    jmp VOICE_ADVANCE
 
-LABE3:
+SLIDE_DOWN:
     adc SND_FREQ_LO,x
     sta SND_FREQ_LO,x
     sta SND_PTR_LO
-    bcs LABED
+    bcs SLIDE_DOWN_CHECK
     dec SND_SLIDE_HI,x
 
-LABED:
+SLIDE_DOWN_CHECK:
     lda SND_SLIDE_HI,x
     sta SND_PTR_HI
     lda SND_TGT_LO,x
     cmp SND_SLIDE_HI,x
-    bcc LABD9
+    bcc SLIDE_CONTINUE
     lda SND_TGT_HI,x
     cmp SND_FREQ_LO,x
-    bcc LABD9
+    bcc SLIDE_CONTINUE
 
-LABFD:
+; Slide finished: clear SND_SLIDE_HI (the "sliding" flag) and go read the
+; next sequence token as normal.
+SLIDE_DONE:
     lda #$00
     sta SND_SLIDE_HI,x
-    jmp LAB0A
+    jmp READ_NEXT_TOKEN
 
 ; -----------------------------------------------------------------------
-; Write a 16-bit frequency to the SID voice selected by SND_VOICE / SND_REGOFS.
+; Write a 16-bit frequency (SND_PTR_LO/HI) to the SID voice selected by
+; SND_VOICE/SND_REGOFS - the shared "actually talk to the SID chip" step
+; used by both PLAY_NOTE and APPLY_SLIDE above. Y (the caller's sequence
+; read position) is stashed in SND_TMP for the duration, since this
+; routine needs Y itself as the SID register offset.
 SID_WRITE_FREQ:
     sty SND_TMP
     ldy SND_REGOFS

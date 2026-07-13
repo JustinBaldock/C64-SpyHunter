@@ -1103,6 +1103,14 @@ INIT_PLAY_MUX:
     sty MUX_SLOT1
     dey
     sty MUX_SLOT0
+    ; <<< EDIT HERE for more starting lives (e.g. for exploring/mapping the
+    ; game): change the #$01 below to any value from #$00 to #$7F (127).
+    ; DO NOT use #$FF (255) or anything >= #$80 - LIVES doubles as a "game
+    ; over" sentinel elsewhere (GAME_LOOP and DRAW_STATUS_PANEL both treat
+    ; any value with bit 7 set as "out of lives"), so a value that high would
+    ; make the game think it's over before it even starts. #$7F is plenty -
+    ; the status panel only ever draws up to 6 life icons regardless, and the
+    ; extra-life award code (further down) stops adding more once LIVES>=6.
     lda #$01
     sta LIVES           ; start with 1 life
     sta EXTRA_LIFE_AVAIL

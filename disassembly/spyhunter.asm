@@ -282,6 +282,7 @@ ZTMP_0A = $0A
 ZTMP_0B = $0B
 ZTMP_0C = $0C
 ZTMP_0D = $0D
+ZTMP_0E = $0E
 ZTMP_0F = $0F
 BIT_MASK_INV = $10    ; complement of BIT_MASK (EOR mask)
 SRC_PTR = $12    ; general source pointer
@@ -371,11 +372,16 @@ OBJ_COLOR = $97    ; blit colour value
 BLIT_COL = $98    ; object screen column
 BLIT_ROW = $99    ; object screen row
 OBJ_ANIM = $9A    ; per-object animation frame
+STATE_9B = $9B    ; per-slot countdown/state byte, used in move handlers (???)
 FLAG_A1 = $A1    ; flag (???)
 OBJ_TYPE = $A2    ; per-object type ($FF=empty); slot1=hero, =$03 in weapons van
 HERO_STATE = $A3    ; hero state = OBJ_TYPE[1]; $FF normal, $03 in weapons van
 SCENE_ID = $A8    ; high-level scene id (car/boat/...); $FF during van sequence
 ANIM_STATE = $A9    ; sub-state / animation selector (???)
+OBJ_POS_X = $AA    ; per-slot world/scroll X position, pre-delta (???, tentative -
+                     ;   8-byte stride matches the object-slot arrays; swapped
+                     ;   between slots by the move handlers below)
+OBJ_POS_Y = $B2    ; per-slot world/scroll Y position, paired with OBJ_POS_X (???)
 SPR_STAGE = $BA    ; staged hardware sprite coords
 SPR_X_SHADOW = $CA    ; sprite X shadow (->$D000)
 SPR_Y_SHADOW = $CB    ; sprite Y shadow
@@ -470,6 +476,14 @@ OBJ_TBL6B = $4D6B
 OBJ_TBL71 = $4D71
 OBJ_TBL73 = $4D73
 OBJ_TBL79 = $4D79
+OBJ_TBL7B = $4D7B    ; per-slot hazard-check value (HAZARD_CHECK_CHAIN)
+STATE_4D83 = $4D83    ; per-slot: swap-target slot index / "paired with" (???)
+STATE_4D84 = $4D84    ; single flag/counter, not per-slot (???)
+STATE_4D89 = $4D89    ; boat: "already crashed/handled this frame" flag (???)
+OBJ_TBL8B = $4D8B    ; per-slot counter, related to STATE_4D83 pairing (???)
+OBJ_TBL93 = $4D93    ; per-slot value read into CONSUME_HIT_MASK_BIT (???)
+OBJ_TBL9B = $4D9B    ; per-slot value, combined with OBJ_TBLA3 (???)
+OBJ_TBLA3 = $4DA3    ; per-slot value, combined with OBJ_TBL9B (???)
 OBJ_TBLAB = $4DAB
 STATE_4DAC = $4DAC
 OBJ_TBLB3 = $4DB3
@@ -478,6 +492,7 @@ OBJ_TBLBB = $4DBB
 STATE_4DC1 = $4DC1
 SCORE_EVENT = $4DC3    ; queued score events
 STAT_CTR = $4DC4    ; statistic counters
+STATE_4DCA = $4DCA    ; short countdown, armed to $3C (60) on a hazard/hit event (???)
 STATE_4DCB = $4DCB
 ; --- VIC-II (video chip) hardware registers, memory-mapped at $D000-$D02E.
 ; Writing these directly controls the screen: sprite positions/colours,
@@ -2868,81 +2883,688 @@ SET_SPRITE_PTR:
     sta SPRITE_PTRS,x
     rts
 ; -----------------------------------------------------------------------
-; Weapon / collision handler routines and their dispatch tables, as data -
-; the same situation as the two data blocks in Stage 5 above (real 6502
-; code, only reached indirectly via a runtime vector, so left undisassembled
-; by a straight-line pass). This is the LARGEST such block in the file
-; (~1000 bytes) and, per its existing label, is specifically about weapons
-; and collisions - meaning this very likely contains the actual pairwise
-; hit-test against HIT_MASK_A/B (built in PROCESS_OBJECTS above) and the
-; code that queues SCORE_EVENT on an enemy kill (see
-; claude/Enemy_Agents_Manual_Reference.md's confirmed POINTS_TBL - 150/500/
-; 700-point tiers - for what a full decode here would likely explain: which
-; OBJ_TYPE maps to which enemy, and why the Road Lord specifically never
-; registers a hit). A strong candidate for a focused future session rather
-; than folded into this general annotation pass.
-    .byte $A5,$33,$29,$03,$D0,$EF,$F0,$E0,$A5,$33,$29,$01,$10,$EA,$AD,$05
-    .byte $4D,$F0,$11,$AD,$B9,$4D,$C9,$04,$90,$0A,$C9,$23,$B0,$06,$A9,$00
-    .byte $8D,$89,$4D,$60,$A9,$00,$8D,$CB,$4D,$8D,$05,$4D,$AD,$79,$4D,$30
-    .byte $28,$C9,$09,$F0,$EE,$AD,$89,$4D,$D0,$1F,$20,$66,$9D,$F0,$1A,$20
-    .byte $60,$9D,$F0,$12,$20,$63,$9D,$F0,$0D,$20,$7C,$9D,$F0,$0B,$20,$76
-    .byte $9D,$D0,$03,$20,$C1,$A7,$4C,$5A,$9C,$A2,$00,$86,$F6,$86,$F7,$86
-    .byte $F9,$AE,$12,$4D,$F0,$03,$CE,$15,$4D,$EE,$CB,$4D,$A9,$02,$8D,$05
-    .byte $4D,$CD,$69,$4D,$D0,$03,$CD,$71,$4D,$08,$A5,$49,$C9,$03,$B0,$09
-    .byte $A9,$08,$28,$F0,$0E,$A9,$00,$F0,$07,$A9,$07,$28,$F0,$05,$A9,$06
-    .byte $A0,$1E,$2C,$A0,$24,$85,$49,$20,$A8,$AA,$4C,$8A,$AA,$BD,$83,$4D
-    .byte $F0,$08,$20,$A8,$AA,$A2,$05,$4C,$C0,$9B,$60,$A9,$FF,$8D,$20,$4D
-    .byte $A5,$9B,$F0,$0A,$C9,$06,$F0,$06,$A9,$00,$8D,$84,$4D,$60,$A5,$44
-    .byte $C9,$15,$D0,$01,$60,$BD,$83,$4D,$F0,$2B,$4C,$B7,$9B,$A9,$04,$2C
-    .byte $A9,$03,$2C,$A9,$06,$2C,$A9,$03,$85,$08,$BD,$83,$4D,$F0,$16,$4C
-    .byte $BE,$9B,$A9,$03,$85,$08,$BD,$83,$4D,$F0,$0A,$DE,$83,$4D,$D0,$EF
-    .byte $A0,$28,$20,$7E,$AA,$20,$76,$9D,$D0,$06,$20,$C1,$A7,$FE,$8B,$4D
-    .byte $20,$60,$9D,$D0,$02,$76,$A2,$BD,$8B,$4D,$D0,$08,$20,$63,$9D,$D0
-    .byte $03,$FE,$8B,$4D,$20,$7C,$9D,$D0,$03,$4C,$C3,$9B,$4C,$5A,$9C,$A5
-    .byte $DF,$20,$DE,$9B,$C0,$08,$F0,$23,$C0,$00,$F0,$04,$C0,$07,$D0,$06
-    .byte $A5,$0C,$05,$05,$D0,$EB,$AD,$1D,$4D,$49,$FE,$8D,$1D,$4D,$79,$AA
-    .byte $00,$99,$AA,$00,$C6,$9B,$A0,$16,$20,$86,$AA,$60,$A0,$02,$A9,$12
-    .byte $2C,$A9,$09,$C8,$D9,$A2,$00,$F0,$04,$38,$66,$A2,$60,$A5,$DF,$20
-    .byte $DE,$9B,$C0,$08,$F0,$14,$C0,$06,$F0,$06,$A5,$0C,$05,$05,$D0,$EF
-    .byte $EE,$89,$4D,$A9,$00,$8D,$05,$4D,$66,$A2,$A5,$0C,$85,$DF,$60,$A5
-    .byte $DF,$20,$DE,$9B,$C0,$08,$F0,$12,$B9,$A2,$00,$C9,$08,$F0,$04,$C9
-    .byte $07,$D0,$0C,$EE,$84,$4D,$66,$A9,$66,$A2,$A5,$0C,$85,$DF,$60,$A5
-    .byte $0C,$05,$05,$D0,$DC,$A5,$DF,$05,$05,$20,$DE,$9B,$C0,$08,$F0,$1B
-    .byte $C0,$00,$F0,$1C,$C0,$06,$F0,$18,$B9,$A2,$00,$C9,$11,$F0,$11,$C9
-    .byte $07,$F0,$0D,$A9,$01,$99,$83,$4D,$38,$66,$A9,$A5,$0C,$85,$DF,$60
-    .byte $A5,$0C,$B0,$D3,$A9,$3C,$8D,$CA,$4D,$D0,$05,$A6,$08,$FE,$C3,$4D
-    .byte $A6,$06,$B5,$AA,$48,$B5,$B2,$48,$20,$2B,$8D,$68,$95,$B2,$68,$95
-    .byte $AA,$A0,$1E,$20,$86,$AA,$68,$68,$4C,$B0,$8A,$A0,$00,$84,$0D,$A0
-    .byte $08,$85,$0C,$25,$05,$F0,$6F,$45,$0C,$85,$0C,$F0,$69,$BD,$93,$4D
-    .byte $85,$08,$A0,$FF,$38,$24,$18,$26,$0D,$C8,$B0,$5A,$A9,$00,$85,$0E
-    .byte $A5,$0C,$25,$0D,$F0,$F0,$A6,$06,$B9,$93,$4D,$85,$09,$18,$B9,$A3
-    .byte $4D,$79,$9B,$4D,$38,$FD,$A3,$4D,$85,$0A,$18,$BD,$A3,$4D,$7D,$9B
-    .byte $4D,$38,$F9,$A3,$4D,$85,$0B,$98,$0A,$AA,$B5,$BB,$30,$06,$C5,$08
-    .byte $B0,$C4,$90,$06,$29,$7F,$C5,$09,$B0,$BC,$C9,$0E,$90,$02,$E6,$0E
-    .byte $B5,$BA,$30,$06,$C5,$0B,$B0,$AE,$90,$06,$29,$7F,$C5,$0A,$B0,$A6
-    .byte $A5,$0C,$45,$0D,$85,$0C,$60,$A5,$DE,$20,$DE,$9B,$A5,$0C,$85,$DE
-    .byte $C0,$08,$D0,$01,$60,$A6,$06,$E0,$06,$F0,$04,$C0,$06,$D0,$68,$A9
-    .byte $10,$D5,$A2,$D0,$06,$A9,$02,$95,$9A,$D0,$0A,$D9,$A2,$00,$D0,$0A
-    .byte $A9,$02,$99,$9A,$00,$A9,$3C,$8D,$CA,$4D,$A9,$0D,$D5,$A2,$F0,$05
-    .byte $D9,$A2,$00,$D0,$1C,$A5,$0E,$D0,$18,$AD,$05,$4D,$D0,$39,$A5,$A8
-    .byte $C9,$05,$D0,$33,$85,$A0,$98,$48,$A0,$26,$20,$82,$AA,$68,$A8,$D0
-    .byte $26,$A9,$0C,$D5,$A2,$F0,$20,$D9,$A2,$00,$F0,$1B,$38,$B5,$B2,$F9
-    .byte $B2,$00,$C9,$07,$10,$0A,$38,$B9,$B2,$00,$F5,$B2,$C9,$07,$30,$07
-    .byte $8A,$9D,$83,$4D,$99,$83,$4D,$B9,$AA,$00,$48,$B5,$AA,$99,$AA,$00
-    .byte $68,$95,$AA,$84,$08,$B5,$AA,$D9,$AA,$00,$10,$06,$8A,$48,$98,$AA
-    .byte $68,$A8,$F6,$AA,$F6,$AA,$8A,$0A,$AA,$18,$B5,$CA,$69,$02,$95,$CA
-    .byte $90,$06,$A5,$05,$05,$DA,$85,$DA,$98,$AA,$D6,$AA,$D6,$AA,$0A,$AA
-    .byte $38,$B5,$CA,$E9,$02,$95,$CA,$B0,$08,$A5,$0D,$49,$FF,$25,$DA,$85
-    .byte $DA,$A4,$08,$A6,$06,$B9,$B2,$00,$48,$B5,$B2,$99,$B2,$00,$68,$95
-    .byte $B2,$D9,$B2,$00,$10,$06,$98,$48,$8A,$A8,$68,$AA,$F6,$B2,$8A,$0A
-    .byte $AA,$F6,$CB,$F6,$CB,$98,$AA,$D6,$B2,$0A,$AA,$D6,$CB,$D6,$CB,$A6
-    .byte $06,$A0,$2C,$20,$86,$AA,$A5,$05,$05,$0C,$4C,$5C,$9C,$A9,$0C,$2C
-    .byte $A9,$0B,$2C,$A9,$0A,$DD,$63,$4D,$F0,$08,$DD,$6B,$4D,$F0,$03,$DD
-    .byte $73,$4D,$60,$A9,$07,$DD,$73,$4D,$60,$BD,$7B,$4D,$20,$68,$9D,$F0
-    .byte $33,$C9,$00,$D0,$17,$A9,$04,$20,$68,$9D,$F0,$28,$A9,$06,$20,$68
-    .byte $9D,$F0,$21,$A9,$07,$20,$68,$9D,$F0,$1A,$D0,$15,$A9,$03,$20,$68
-    .byte $9D,$F0,$0E,$A9,$05,$20,$68,$9D,$F0,$0A,$A9,$02,$20,$68,$9D,$F0
-    .byte $03,$A9,$00,$60,$A9,$01,$60
+; Per-object-type MOVE handlers for several less-common OBJ_TYPEs, plus the
+; shared hazard-check and sprite-proximity-collision primitives they call.
+; Reached only indirectly via OBJINIT_PARAM_TBL's move-vector column
+; (Stage 5) - manually disassembled this session from two confirmed
+; VICE-snapshot program-counter entry points ($992C in become-boat.vsf,
+; $9820 in weapon-oil-used.vsf). See claude/Collision_Detection_Notes.md for
+; the full trace, including the confirmed finding that CONSUME_HIT_MASK_BIT/
+; CONSUME_HIT_MASK_A/HIT_RESOLVE_* below is where HIT_MASK_A/HIT_MASK_B
+; (built per-frame in PROCESS_OBJECTS, Stage 5) finally get consumed, and
+; that SCORE_EVENT gets queued from ARM_SCORE_EVENT.
+;
+; The 7 instructions below are the tail of a different, still-undissected
+; fragment that happens to sit immediately before this block (its branches
+; target addresses earlier than this block, inside the OBJ_MOVE_DISPATCH
+; data above) - not part of any MOVE handler here, so left unlabelled.
+    lda FRAME_CTR
+    and #$03
+    bne $99D8
+    beq $99CB
+    lda FRAME_CTR
+    and #$01
+    bpl $99DB
+; Type $05/$06 MOVE handler - the boat. STATE_4D05 is a per-boat "crash/
+; special-sequence in progress" flag; STATE_4DB9 is the same blit-column
+; state var UPDATE_WEAPONS uses.
+MOVE_TYPE_05_06:
+    lda STATE_4D05
+    beq MOVE_BOAT_MAIN
+    lda STATE_4DB9
+    cmp #$04
+    bcc MOVE_BOAT_MAIN
+    cmp #$23
+    bcs MOVE_BOAT_MAIN
+    lda #$00
+    sta STATE_4D89
+MOVE_BOAT_RTS:
+    rts
+; Reset both sequence flags, then run the environmental-hazard check chain
+; (HAZARD_CHECK_* below) against this boat's nearby tile-classification
+; codes (OBJ_TBL63/6B/73,x - populated per frame by OBJ_CALC_SCREEN_POS,
+; Stage 5). OBJ_TBL79 is read directly here (not ,x-indexed) - not fully
+; explained.
+MOVE_BOAT_MAIN:
+    lda #$00
+    sta STATE_4DCB
+    sta STATE_4D05
+    lda OBJ_TBL79
+    bmi MOVE_BOAT_CRASH
+    cmp #$09
+    beq MOVE_BOAT_RTS
+    lda STATE_4D89
+    bne MOVE_BOAT_CRASH
+    jsr HAZARD_CHECK_0A
+    beq MOVE_BOAT_CRASH
+    jsr HAZARD_CHECK_0C
+    beq MOVE_BOAT_CONTINUE
+    jsr HAZARD_CHECK_0B
+    beq MOVE_BOAT_CONTINUE
+    jsr HAZARD_CHECK_CHAIN
+    beq MOVE_BOAT_CRASH
+    jsr HAZARD_CHECK_07
+    bne MOVE_BOAT_CONTINUE
+    jsr $A7C1
+; No hazard hit this frame - just continue (consume HIT_MASK_A for this slot).
+MOVE_BOAT_CONTINUE:
+    jmp CONSUME_HIT_MASK_A
+; A hazard WAS hit: clear all ammo, and - CONFIRMED by reading this code -
+; decrement LIVES unless the game timer has already expired
+; (EXTRA_LIFE_AVAIL nonzero). This directly answers the open question in
+; claude/Boat_River_Notes.md: crashing into a water hazard costs a life.
+MOVE_BOAT_CRASH:
+    ldx #$00
+    stx GUN_HEAT
+    stx MISSILE_CNT
+    stx SMOKE_CNT
+    ldx EXTRA_LIFE_AVAIL
+    beq MOVE_BOAT_ALIVE
+    dec LIVES
+MOVE_BOAT_ALIVE:
+    inc STATE_4DCB
+    lda #$02
+    sta STATE_4D05
+    cmp OBJ_TBL69
+    bne MOVE_BOAT_SEQ
+    cmp OBJ_TBL71
+MOVE_BOAT_SEQ:
+    php
+    lda SEQ_STATE
+    cmp #$03
+    bcs MOVE_BOAT_SEQ_HI
+    lda #$08
+    plp
+    beq MOVE_BOAT_SEQ_ARM
+    lda #$00
+    beq MOVE_BOAT_SEQ_LO
+MOVE_BOAT_SEQ_HI:
+    lda #$07
+    plp
+    beq MOVE_BOAT_SEQ_ARM
+    lda #$06
+; MOVE_BOAT_SEQ_LO/MOVE_BOAT_SEQ_ARM overlap: falling through here runs
+; "ldy #$1E" then a BIT-absolute skip trick over what would otherwise be
+; "ldy #$24", landing on "sta SEQ_STATE" with Y=$1E. Branching directly to
+; MOVE_BOAT_SEQ_ARM instead re-reads the same two bytes fresh as "ldy #$24"
+; - the same multi-entry-point idiom as HAZARD_CHECK_0C/0B/0A further below.
+; Kept as raw bytes since ca65 can't express two different instruction
+; readings of the same bytes with ordinary mnemonics.
+MOVE_BOAT_SEQ_LO:
+    ldy #$1E
+    .byte $2C
+MOVE_BOAT_SEQ_ARM:
+    .byte $A0,$24
+    sta SEQ_STATE
+    jsr $AAA8
+    jmp $AA8A
+; Type $07's own (short) MOVE handler - a separate routine, not a
+; continuation of the boat logic above (confirmed via the OBJINIT_PARAM_TBL
+; vector table: type $07 move = $9A80 exactly). Candidate: a short-lived
+; transient object (e.g. a dropped bomb - Enemy_Agents_Manual_Reference.md).
+MOVE_TYPE_07:
+    lda STATE_4D83,x
+    beq MOVE_TYPE_07_DONE
+    jsr $AAA8
+    ldx #$05
+    jmp ARM_SCORE_EVENT
+MOVE_TYPE_07_DONE:
+    rts
+; Types $00-$03 (the most common "plain driving" objects) share this
+; handler. It does NOT touch position at all - it only decides whether to
+; despawn/reset STATE_4D84, then falls into the type-$18 handler below on
+; the "normal" path. (???: exact purpose of the STATE_9B check)
+MOVE_TYPE_00_03:
+    lda #$FF
+    sta HIT_GROUP1
+    lda STATE_9B
+    beq MOVE_TYPE_18
+    cmp #$06
+    beq MOVE_TYPE_18
+    lda #$00
+    sta STATE_4D84
+    rts
+; Type $18 MOVE handler (also the fallthrough continuation from types
+; $00-$03 above). Candidate: boat-respawn object - see
+; claude/Ice_Road_And_Lap_Notes.md's OBJ_TYPE $18/$19 discussion.
+MOVE_TYPE_18:
+    lda ROAD_FEATURE
+    cmp #$15
+    bne MOVE_TYPE_0E_10
+    rts
+; Types $0E/$0F/$10 share this handler (also the fallthrough continuation
+; from type $18 above): if this slot already has a hazard-hit pending
+; (STATE_4D83,x nonzero) jump straight to ARM_HAZARD_TIMER; otherwise fall
+; into the MOVE_TYPE_09/0D/12/13 overlap chain below.
+MOVE_TYPE_0E_10:
+    lda STATE_4D83,x
+    beq MOVE_HAZARD_TAIL
+    jmp ARM_HAZARD_TIMER
+; Types $09/$0D/$12/$13 share a chain of BIT-skip "multi-entry" landings
+; that all converge on storing a per-type value ($04/$03/$06/$03
+; respectively) into ZTMP_08, then run the same hazard-hit check. Kept as
+; raw bytes for the BIT-skip portion - see the HAZARD_CHECK_0C/0B/0A comment
+; further below for the same idiom.
+MOVE_TYPE_09:
+    lda #$04
+    .byte $2C
+MOVE_TYPE_0D:
+    .byte $A9,$03,$2C
+MOVE_TYPE_12:
+    .byte $A9,$06,$2C
+MOVE_TYPE_13:
+    .byte $A9,$03
+    sta ZTMP_08
+    lda STATE_4D83,x
+    beq MOVE_HAZARD_TAIL
+MOVE_TYPE_0C_RETRY:
+    jmp ARM_SCORE_EVENT_X8
+; Type $0C MOVE handler: same convergence point as above, but with its own
+; countdown (STATE_4D83,x) before falling through to MOVE_HAZARD_TAIL.
+MOVE_TYPE_0C:
+    lda #$03
+    sta ZTMP_08
+    lda STATE_4D83,x
+    beq MOVE_HAZARD_TAIL
+    dec STATE_4D83,x
+    bne MOVE_TYPE_0C_RETRY
+    ldy #$28
+    jsr $AA7E
+; Shared tail for the handlers above: run the hazard-check chain against
+; this slot's nearby tile codes; on a match, consume HIT_MASK_A; on a full
+; miss, jump to the sprite-position "swap" / sound-effect helper instead.
+MOVE_HAZARD_TAIL:
+    jsr HAZARD_CHECK_07
+    bne MOVE_HAZARD_TAIL_B
+    jsr $A7C1
+    inc OBJ_TBL8B,x
+MOVE_HAZARD_TAIL_B:
+    jsr HAZARD_CHECK_0C
+    bne MOVE_HAZARD_TAIL_C
+    ror OBJ_TYPE,x
+MOVE_HAZARD_TAIL_C:
+    lda OBJ_TBL8B,x
+    bne MOVE_HAZARD_TAIL_D
+    jsr HAZARD_CHECK_0B
+    bne MOVE_HAZARD_TAIL_D
+    inc OBJ_TBL8B,x
+MOVE_HAZARD_TAIL_D:
+    jsr HAZARD_CHECK_CHAIN
+    bne MOVE_HAZARD_MATCH
+    jmp TRIGGER_SWAP_FX
+MOVE_HAZARD_MATCH:
+    jmp CONSUME_HIT_MASK_A
+; Type $0B MOVE handler: consumes HIT_MASK_B against every other slot
+; (CONSUME_HIT_MASK_BIT below); on a specific proximity result (y=$00),
+; retries, otherwise toggles STATE_4D1D and nudges this slot's OBJ_POS_X.
+MOVE_TYPE_0B:
+    lda HIT_MASK_B
+MOVE_TYPE_0B_LOOP:
+    jsr CONSUME_HIT_MASK_BIT
+    cpy #$08
+    beq MOVE_TYPE_0B_RTS
+    cpy #$00
+    beq MOVE_TYPE_0B_RETRY
+    cpy #$07
+    bne MOVE_TYPE_0B_APPLY
+MOVE_TYPE_0B_RETRY:
+    lda ZTMP_0C
+    ora BIT_MASK
+    bne MOVE_TYPE_0B_LOOP
+MOVE_TYPE_0B_APPLY:
+    lda STATE_4D1D
+    eor #$FE
+    sta STATE_4D1D
+    adc OBJ_POS_X,y
+    sta OBJ_POS_X,y
+    dec STATE_9B
+    ldy #$16
+    jsr $AA86
+MOVE_TYPE_0B_RTS:
+    rts
+; Types $1A/$0A share this handler via another BIT-skip overlap entry (see
+; the HAZARD_CHECK_0C/0B/0A comment for the same idiom): type $1A starts at
+; MOVE_TYPE_1A with Y preloaded to $02 and A=$12, while type $0A enters
+; directly at MOVE_TYPE_0A with A=$09 and Y left as the caller set it. Both
+; paths then check OBJ_TYPE,y against A and, on a miss, just flip a bit of
+; this slot's own OBJ_TYPE via ROR (???: exact purpose unclear).
+MOVE_TYPE_1A:
+    ldy #$02
+    lda #$12
+    .byte $2C
+MOVE_TYPE_0A:
+    .byte $A9,$09
+    iny
+    cmp OBJ_TYPE,y
+    beq MOVE_0A1A_HIT
+    sec
+    ror OBJ_TYPE
+    rts
+; On a match: consume HIT_MASK_B against every other slot; a hit specifically
+; on slot y=$06 marks STATE_4D89 (the boat's own "already crashed" flag -
+; see MOVE_TYPE_05_06 above) and resets STATE_4D05.
+MOVE_0A1A_HIT:
+    lda HIT_MASK_B
+MOVE_0A1A_LOOP:
+    jsr CONSUME_HIT_MASK_BIT
+    cpy #$08
+    beq MOVE_0A1A_DONE
+    cpy #$06
+    beq MOVE_0A1A_HAZARD
+    lda ZTMP_0C
+    ora BIT_MASK
+    bne MOVE_0A1A_LOOP
+MOVE_0A1A_HAZARD:
+    inc STATE_4D89
+    lda #$00
+    sta STATE_4D05
+    ror OBJ_TYPE
+MOVE_0A1A_DONE:
+    lda ZTMP_0C
+    sta HIT_MASK_B
+    rts
+; Type $1B MOVE handler: consumes HIT_MASK_B twice against two slightly
+; different sets of type codes ($08/$07 first pass, $11/$07 second pass),
+; marking a hit via STATE_4D84/STATE_4D83,y and ROR'ing ANIM_STATE/OBJ_TYPE.
+MOVE_TYPE_1B:
+    lda HIT_MASK_B
+MOVE_TYPE_1B_LOOP:
+    jsr CONSUME_HIT_MASK_BIT
+    cpy #$08
+    beq MOVE_TYPE_1B_DONE
+    lda OBJ_TYPE,y
+    cmp #$08
+    beq MOVE_TYPE_1B_HIT
+    cmp #$07
+    bne MOVE_TYPE_1B_SKIP
+MOVE_TYPE_1B_HIT:
+    inc STATE_4D84
+    ror ANIM_STATE
+    ror OBJ_TYPE
+MOVE_TYPE_1B_DONE:
+    lda ZTMP_0C
+    sta HIT_MASK_B
+    rts
+MOVE_TYPE_1B_SKIP:
+    lda ZTMP_0C
+    ora BIT_MASK
+    bne MOVE_TYPE_1B_LOOP
+MOVE_TYPE_1B_B:
+    lda HIT_MASK_B
+MOVE_TYPE_1B_B_OR:
+    ora BIT_MASK
+    jsr CONSUME_HIT_MASK_BIT
+    cpy #$08
+    beq MOVE_TYPE_1B_B_DONE
+    cpy #$00
+    beq MOVE_TYPE_1B_B_NOHIT
+    cpy #$06
+    beq MOVE_TYPE_1B_B_NOHIT
+    lda OBJ_TYPE,y
+    cmp #$11
+    beq MOVE_TYPE_1B_B_NOHIT
+    cmp #$07
+    beq MOVE_TYPE_1B_B_NOHIT
+    lda #$01
+    sta STATE_4D83,y
+    sec
+    ror ANIM_STATE
+MOVE_TYPE_1B_B_DONE:
+    lda ZTMP_0C
+    sta HIT_MASK_B
+    rts
+MOVE_TYPE_1B_B_NOHIT:
+    lda ZTMP_0C
+    bcs MOVE_TYPE_1B_B_OR
+; Arm the short hazard-effect countdown (STATE_4DCA=$3C) then fall into
+; ARM_SCORE_EVENT_X8 - reached both by jmp from several MOVE_TYPE_* handlers
+; above and by falling through from MOVE_TYPE_1B_B_NOHIT.
+ARM_HAZARD_TIMER:
+    lda #$3C
+    sta STATE_4DCA
+    bne TRIGGER_SWAP_FX
+; Queue a SCORE_EVENT for the slot in ZTMP_08 (used when the caller already
+; knows which slot, rather than the current OBJ_IDX).
+ARM_SCORE_EVENT_X8:
+    ldx ZTMP_08
+; Queue a SCORE_EVENT for slot x - the confirmed enemy-kill scoring trigger
+; (see claude/Enemy_Agents_Manual_Reference.md/Collision_Detection_Notes.md)
+; - then fall into the position-preserve + sound-effect helper below.
+ARM_SCORE_EVENT:
+    inc SCORE_EVENT,x
+; Preserve this object's OBJ_POS_X/OBJ_POS_Y across a call to $8D2B (push,
+; call, pop back unchanged - not a swap, despite first appearances), then
+; queue sound effect $1E via $AA86. Shared tail for several handlers above;
+; the trailing two extra PLAs balance pushes made by the (unseen) caller
+; before it dispatched into this MOVE-handler block.
+TRIGGER_SWAP_FX:
+    ldx OBJ_IDX
+    lda OBJ_POS_X,x
+    pha
+    lda OBJ_POS_Y,x
+    pha
+    jsr $8D2B
+    pla
+    sta OBJ_POS_Y,x
+    pla
+    sta OBJ_POS_X,x
+    ldy #$1E
+    jsr $AA86
+    pla
+    pla
+    jmp $8AB0
+; Consume one bit of a caller-supplied collision mask (A = HIT_MASK_A or
+; HIT_MASK_B on entry): for this object slot (x = OBJ_IDX) paired against
+; each other slot (y = 0..7), compare the clamped sprite-distance values
+; (SPR_STAGE/SPR_STAGE+1,x - populated by OBJ_CALC_SPRITE_DELTA, Stage 5)
+; against per-slot thresholds (OBJ_TBL93,x/y, OBJ_TBLA3 and OBJ_TBL9B) and
+; fold a hit/miss bit into the mask (ZTMP_0C) via XOR with BIT_MASK. This is
+; where HIT_MASK_A/HIT_MASK_B (built by PROCESS_OBJECTS, Stage 5) actually
+; get consumed - i.e. the sprite-to-sprite proximity/collision check.
+CONSUME_HIT_MASK_BIT:
+    ldy #$00
+    sty ZTMP_0D
+    ldy #$08
+    sta ZTMP_0C
+    and BIT_MASK
+    beq CONSUME_HIT_MASK_BIT_DONE
+    eor ZTMP_0C
+    sta ZTMP_0C
+    beq CONSUME_HIT_MASK_BIT_DONE
+    lda OBJ_TBL93,x
+    sta ZTMP_08
+    ldy #$FF
+    sec
+; Overlap: falling through here runs "sec : bit $18" (a no-op test) before
+; ROL; branching directly to CONSUME_HIT_MASK_ALT instead re-reads the same
+; byte fresh as "clc", giving ROL a clear carry - a carry-select trick, not
+; a real BIT test. Kept as raw bytes for the same reason as the other
+; multi-entry idioms in this file.
+    .byte $24
+CONSUME_HIT_MASK_ALT:
+    .byte $18
+    rol ZTMP_0D
+    iny
+    bcs CONSUME_HIT_MASK_BIT_DONE
+    lda #$00
+    sta ZTMP_0E
+    lda ZTMP_0C
+    and ZTMP_0D
+    beq CONSUME_HIT_MASK_ALT
+    ldx OBJ_IDX
+    lda OBJ_TBL93,y
+    sta ZTMP_09
+    clc
+    lda OBJ_TBLA3,y
+    adc OBJ_TBL9B,y
+    sec
+    sbc OBJ_TBLA3,x
+    sta ZTMP_0A
+    clc
+    lda OBJ_TBLA3,x
+    adc OBJ_TBL9B,x
+    sec
+    sbc OBJ_TBLA3,y
+    sta ZTMP_0B
+    tya
+    asl
+    tax
+    lda SPR_STAGE+1,x
+    bmi CONSUME_HIT_MASK_X1
+    cmp ZTMP_08
+    bcs CONSUME_HIT_MASK_ALT
+    bcc CONSUME_HIT_MASK_X2
+CONSUME_HIT_MASK_X1:
+    and #$7F
+    cmp ZTMP_09
+    bcs CONSUME_HIT_MASK_ALT
+CONSUME_HIT_MASK_X2:
+    cmp #$0E
+    bcc CONSUME_HIT_MASK_X3
+    inc ZTMP_0E
+CONSUME_HIT_MASK_X3:
+    lda SPR_STAGE,x
+    bmi CONSUME_HIT_MASK_X4
+    cmp ZTMP_0B
+    bcs CONSUME_HIT_MASK_ALT
+    bcc CONSUME_HIT_MASK_X5
+CONSUME_HIT_MASK_X4:
+    and #$7F
+    cmp ZTMP_0A
+    bcs CONSUME_HIT_MASK_ALT
+CONSUME_HIT_MASK_X5:
+    lda ZTMP_0C
+    eor ZTMP_0D
+    sta ZTMP_0C
+CONSUME_HIT_MASK_BIT_DONE:
+    rts
+; Consume HIT_MASK_A for this slot, then - if the loop actually ran (cpy
+; check distinguishes that from "masked out immediately") - run the
+; object-type-specific effect resolution below (arm hazard timers, pair up
+; slots, nudge sprite shadow positions, queue a sound effect).
+CONSUME_HIT_MASK_A:
+    lda HIT_MASK_A
+CONSUME_HIT_MASK_A_CONT:
+    jsr CONSUME_HIT_MASK_BIT
+    lda ZTMP_0C
+    sta HIT_MASK_A
+    cpy #$08
+    bne HIT_RESOLVE_START
+    rts
+HIT_RESOLVE_START:
+    ldx OBJ_IDX
+    cpx #$06
+    beq HIT_RESOLVE_TYPE10
+    cpy #$06
+    bne HIT_RESOLVE_SWAPXY
+HIT_RESOLVE_TYPE10:
+    lda #$10
+    cmp OBJ_TYPE,x
+    bne HIT_RESOLVE_TYPE10_Y
+    lda #$02
+    sta OBJ_ANIM,x
+    bne HIT_RESOLVE_ARM
+HIT_RESOLVE_TYPE10_Y:
+    cmp OBJ_TYPE,y
+    bne HIT_RESOLVE_TYPE0D
+    lda #$02
+    sta OBJ_ANIM,y
+HIT_RESOLVE_ARM:
+    lda #$3C
+    sta STATE_4DCA
+HIT_RESOLVE_TYPE0D:
+    lda #$0D
+    cmp OBJ_TYPE,x
+    beq HIT_RESOLVE_TYPE0D_CHECK
+    cmp OBJ_TYPE,y
+    bne HIT_RESOLVE_TYPE0C
+HIT_RESOLVE_TYPE0D_CHECK:
+    lda ZTMP_0E
+    bne HIT_RESOLVE_TYPE0C
+    lda STATE_4D05
+    bne HIT_RESOLVE_SWAPXY
+    lda SCENE_ID
+    cmp #$05
+    bne HIT_RESOLVE_SWAPXY
+    sta $A0
+    tya
+    pha
+    ldy #$26
+    jsr $AA82
+    pla
+    tay
+    bne HIT_RESOLVE_SWAPXY
+HIT_RESOLVE_TYPE0C:
+    lda #$0C
+    cmp OBJ_TYPE,x
+    beq HIT_RESOLVE_SWAPXY
+    cmp OBJ_TYPE,y
+    beq HIT_RESOLVE_SWAPXY
+    sec
+    lda OBJ_POS_Y,x
+    sbc OBJ_POS_Y,y
+    cmp #$07
+    bpl HIT_RESOLVE_PAIR
+    sec
+    lda OBJ_POS_Y,y
+    sbc OBJ_POS_Y,x
+    cmp #$07
+    bmi HIT_RESOLVE_SWAPXY
+HIT_RESOLVE_PAIR:
+    txa
+    sta STATE_4D83,x
+    sta STATE_4D83,y
+; Swap OBJ_POS_X between slots x and y, then nudge SPR_X_SHADOW/SPR_XMSB and
+; the SPR_Y_SHADOW-family counters for both slots. (???: exact meaning of
+; the doubled-index adjustments below.)
+HIT_RESOLVE_SWAPXY:
+    lda OBJ_POS_X,y
+    pha
+    lda OBJ_POS_X,x
+    sta OBJ_POS_X,y
+    pla
+    sta OBJ_POS_X,x
+    sty ZTMP_08
+    lda OBJ_POS_X,x
+    cmp OBJ_POS_X,y
+    bpl HIT_RESOLVE_SWAPXY2
+    txa
+    pha
+    tya
+    tax
+    pla
+    tay
+HIT_RESOLVE_SWAPXY2:
+    inc OBJ_POS_X,x
+    inc OBJ_POS_X,x
+    txa
+    asl
+    tax
+    clc
+    lda SPR_X_SHADOW,x
+    adc #$02
+    sta SPR_X_SHADOW,x
+    bcc HIT_RESOLVE_INCPOS
+    lda BIT_MASK
+    ora SPR_XMSB
+    sta SPR_XMSB
+HIT_RESOLVE_INCPOS:
+    tya
+    tax
+    dec OBJ_POS_X,x
+    dec OBJ_POS_X,x
+    asl
+    tax
+    sec
+    lda SPR_X_SHADOW,x
+    sbc #$02
+    sta SPR_X_SHADOW,x
+    bcs HIT_RESOLVE_DECPOS
+    lda ZTMP_0D
+    eor #$FF
+    and SPR_XMSB
+    sta SPR_XMSB
+HIT_RESOLVE_DECPOS:
+    ldy ZTMP_08
+    ldx OBJ_IDX
+    lda OBJ_POS_Y,y
+    pha
+    lda OBJ_POS_Y,x
+    sta OBJ_POS_Y,y
+    pla
+    sta OBJ_POS_Y,x
+    cmp OBJ_POS_Y,y
+    bpl HIT_RESOLVE_TAIL
+    tya
+    pha
+    txa
+    tay
+    pla
+    tax
+HIT_RESOLVE_TAIL:
+    inc OBJ_POS_Y,x
+    txa
+    asl
+    tax
+    inc SPR_Y_SHADOW,x
+    inc SPR_Y_SHADOW,x
+    tya
+    tax
+    dec OBJ_POS_Y,x
+    asl
+    tax
+    dec SPR_Y_SHADOW,x
+    dec SPR_Y_SHADOW,x
+    ldx OBJ_IDX
+    ldy #$2C
+    jsr $AA86
+    lda BIT_MASK
+    ora ZTMP_0C
+    jmp CONSUME_HIT_MASK_A_CONT
+; Shared hazard-detection primitive (HAZARD_CHECK_0C/0B/0A/COMMON): each of
+; the first three entries preloads a different target byte before falling
+; into the common comparison - the same "multiple entry points into
+; overlapping code" trick used elsewhere in this file (e.g. UPDATE_HAZARDS's
+; DEC_TIMER1/2/3). Confirmed by disassembling from each JSR target
+; independently - see claude/Collision_Detection_Notes.md.
+HAZARD_CHECK_0C:
+    lda #$0C
+    .byte $2C
+HAZARD_CHECK_0B:
+    .byte $A9,$0B,$2C
+HAZARD_CHECK_0A:
+    .byte $A9,$0A
+; Z=1 if A matches any of OBJ_TBL63/6B/73,x (the tile-classification bytes
+; OBJ_CALC_SCREEN_POS populates each frame), Z=0 otherwise.
+HAZARD_CHECK_COMMON:
+    cmp OBJ_TBL63,x
+    beq HAZARD_CHECK_RTS
+    cmp OBJ_TBL6B,x
+    beq HAZARD_CHECK_RTS
+    cmp OBJ_TBL73,x
+HAZARD_CHECK_RTS:
+    rts
+; Simpler single-slot variant (checks OBJ_TBL73,x only).
+HAZARD_CHECK_07:
+    lda #$07
+    cmp OBJ_TBL73,x
+    rts
+; Checks a per-slot value (OBJ_TBL7B,x) then a fixed sequence of hazard
+; codes in turn ($04,$06,$07,$03,$05,$02) - falls into HAZARD_CHECK_CHAIN2.
+HAZARD_CHECK_CHAIN:
+    lda OBJ_TBL7B,x
+    jsr HAZARD_CHECK_COMMON
+    beq HAZARD_CHECK_MATCH
+    cmp #$00
+    bne HAZARD_CHECK_CHAIN2
+    lda #$04
+    jsr HAZARD_CHECK_COMMON
+    beq HAZARD_CHECK_MATCH
+    lda #$06
+    jsr HAZARD_CHECK_COMMON
+    beq HAZARD_CHECK_MATCH
+    lda #$07
+    jsr HAZARD_CHECK_COMMON
+    beq HAZARD_CHECK_MATCH
+    bne HAZARD_CHECK_NOMATCH
+HAZARD_CHECK_CHAIN2:
+    lda #$03
+    jsr HAZARD_CHECK_COMMON
+    beq HAZARD_CHECK_NOMATCH
+    lda #$05
+    jsr HAZARD_CHECK_COMMON
+    beq HAZARD_CHECK_MATCH
+    lda #$02
+    jsr HAZARD_CHECK_COMMON
+    beq HAZARD_CHECK_MATCH
+; A=0: none of the chain's hazard codes matched.
+HAZARD_CHECK_NOMATCH:
+    lda #$00
+    rts
+; A=1: one of the chain's hazard codes matched.
+HAZARD_CHECK_MATCH:
+    lda #$01
+    rts
 
 ; -----------------------------------------------------------------------
 ; Pick the current road section / difficulty (SCENE_IDX) from game state.

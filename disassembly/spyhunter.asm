@@ -1104,15 +1104,16 @@ INIT_PLAY_MUX:
     dey
     sty MUX_SLOT0
     ; <<< EDIT HERE for more starting lives (e.g. for exploring/mapping the
-    ; game): change the #$01 below to any value from #$00 to #$7F (127).
+    ; game): change the #$7F below to any value from #$00 to #$7F (127).
     ; DO NOT use #$FF (255) or anything >= #$80 - LIVES doubles as a "game
     ; over" sentinel elsewhere (GAME_LOOP and DRAW_STATUS_PANEL both treat
     ; any value with bit 7 set as "out of lives"), so a value that high would
     ; make the game think it's over before it even starts. #$7F is plenty -
     ; the status panel only ever draws up to 6 life icons regardless, and the
     ; extra-life award code (further down) stops adding more once LIVES>=6.
-    lda #$01
-    sta LIVES           ; start with 1 life
+    ; (currently set to #$7F = 127, in place of the original game's #$01)
+    lda #$7F
+    sta LIVES
     sta EXTRA_LIFE_AVAIL
     dec EXTRA_LIFE_AVAIL   ; ...then immediately drop it to 0 = "timer
                             ;   running/shown" (see the header's timer notes -
@@ -1208,16 +1209,36 @@ INIT_ALL_OBJECT_SLOTS_LOOP:
                         ;   by this stage - that routine eventually rts's back)
 
 ; -----------------------------------------------------------------------
-; Raster IRQ, top of frame ($83C3, vectored from IRQ_MAIN).
+; Raster IRQ, top of frame ($83C3, vectored from IRQ_MAIN below). This is the
+; SECOND half of the "chained raster interrupt" described in the header: the
+; game alternates between two IRQ handlers across a frame, re-pointing
+; VEC_IRQ/VIC_RASTER to each other so raster line X triggers IRQ_TOP_PANEL,
+; which then arms the NEXT compare (around line $F1, IRQ_MAIN territory) and
+; points the vector back - the pair keep re-triggering each other all the
+; way down the screen. This half repaints the border/background colours to
+; the status-PANEL palette (as opposed to the play-area "split" palette) and
+; hands back off to IRQ_MAIN's raster range.
+;
+; An interrupt can fire in the middle of ANY instruction, so the very first
+; thing any IRQ handler must do is save every register it's about to use
+; (here: A and X, via PHA/PHA - note Y isn't touched, so it doesn't need
+; saving) and the very last thing is restore them in reverse order before
+; RTI (ReTurn from Interrupt - like RTS, but also restores the flags the
+; interrupted code had, from the extra byte the CPU auto-pushed on entry).
 IRQ_TOP_PANEL:
-    pha
+    pha                 ; save A
     txa
-    pha
+    pha                 ; save X (via A, since there's no direct "push X")
     ldx #$04
 
-L83C8:
+; A tiny busy-wait: do nothing $04 times. Real raster IRQs need pixel-exact
+; timing, and the number of CPU cycles taken to get here varies slightly
+; frame to frame - a short fixed delay like this "eats" that jitter so
+; everything after it lands on a consistent cycle, keeping the screen split
+; stable instead of wobbling by a pixel.
+IRQ_TOP_STABILISE_DELAY:
     dex
-    bne L83C8
+    bne IRQ_TOP_STABILISE_DELAY
     lda BORDER_COL_TOP
     sta VIC_BORDER
     sta VIC_BG0
@@ -1225,54 +1246,62 @@ L83C8:
     sta VIC_BG1
     lda MC_COL2_TOP
     sta VIC_BG2
-    ldx #$F1
+    ldx #$F1            ; default: next raster split at line $F1...
     lda VIC_CR1
-    and #$07
-    cmp #$02
-    beq L83E9
-    inx
+    and #$07            ; ...but VIC_CR1's low 3 bits are the fine Y-scroll,
+    cmp #$02             ;   which shifts the whole picture down by a pixel -
+    beq IRQ_TOP_SET_RASTER  ; so when it's not the expected value, bump the
+    inx                      ;   target line by one to compensate (X = $F2)
 
-L83E9:
-    stx VIC_RASTER
+IRQ_TOP_SET_RASTER:
+    stx VIC_RASTER      ; arm the next raster-compare line
     lda #$02
-    sta VEC_IRQ
+    sta VEC_IRQ         ; re-point the IRQ vector to $8402 = IRQ_MAIN...
     lda #$84
-    sta VEC_IRQ_HI
+    sta VEC_IRQ_HI      ; ...so THAT handler runs when this new line is hit
     lda #$01
-    sta VIC_IRR
+    sta VIC_IRR         ; acknowledge this raster interrupt
     pla
-    tax
-    pla
-    rti
+    tax                 ; restore X
+    pla                 ; restore A
+    rti                 ; back to whatever the CPU was doing, flags restored
 
 ; -----------------------------------------------------------------------
-; Jump through VEC_SCROLL ($2897) into the current road-scroll chunk.
+; Jump through VEC_SCROLL ($2897) into the current road-scroll chunk - the
+; same "RAM vector"/function-pointer trick as GAME_DISPATCH/VEC_STATE above,
+; here used to switch which scrolling routine runs depending on game state.
 SCROLL_DISPATCH:
     jmp (VEC_SCROLL)
 
 ; -----------------------------------------------------------------------
-; Main raster IRQ ($8402).
+; Main raster IRQ ($8402) - the OTHER half of the chained top/bottom raster
+; pair described above IRQ_TOP_PANEL. IRQ_HALF flips between the two halves
+; each time this fires: IRQ_HALF=0 means "we're at the bottom split" (the
+; scrolling road/game-logic half, IRQ_BOTTOM_SCROLL below); IRQ_HALF!=0 means
+; "we're partway back up, arm the top/panel split" (this routine, inline).
 IRQ_MAIN:
-    cld
+    cld                 ; belt-and-braces: make sure decimal mode is off
     pha
     txa
     pha
     tya
-    pha
+    pha                 ; save A, X, Y - see the note above IRQ_TOP_PANEL
     ldx #$03
 
-L840A:
+IRQ_MAIN_STABILISE_DELAY:
     dex
-    bne L840A
+    bne IRQ_MAIN_STABILISE_DELAY  ; same cycle-jitter trick as IRQ_TOP_PANEL
     lda D011_SHADOW
-    sta VIC_CR1
+    sta VIC_CR1         ; apply this frame's screen-control settings...
     lda D018_SHADOW
-    sta VIC_MEMPTR
+    sta VIC_MEMPTR      ; ...and screen/charset pointer (which buffer's shown)
     ldy IRQ_HALF
-    bne L841F
-    jmp IRQ_BOTTOM_SCROLL
+    bne ARM_SPLIT_TO_PANEL
+    jmp IRQ_BOTTOM_SCROLL   ; IRQ_HALF=0 -> do the bottom-half road/game work
 
-L841F:
+; Arm the switch BACK to the top/panel half: set the panel's border/
+; background colours, then figure out where the split line should be.
+ARM_SPLIT_TO_PANEL:
     lda BORDER_COL_SPLIT
     sta VIC_BORDER
     sta VIC_BG0
@@ -1282,45 +1311,57 @@ L841F:
     sta VIC_BG2
     lda SPLIT_RASTER
     cmp #$EE
-    bcc L8445
-    lda BORDER_COL_SPLIT
-    sta BORDER_COL_TOP
-    lda MC_COL1_SPLIT
-    sta MC_COL1_TOP
-    lda MC_COL2_SPLIT
-    sta MC_COL2_TOP
-    lda #$2F
+    bcc ARM_RASTER_SPLIT    ; normally just reuse SPLIT_RASTER as-is...
+    lda BORDER_COL_SPLIT     ; ...but if it's drifted near the bottom of the
+    sta BORDER_COL_TOP        ; screen ($EE+), that's this frame's LAST split -
+    lda MC_COL1_SPLIT          ; copy the play-area colours to the "top"
+    sta MC_COL1_TOP              ; variables too (so the panel redraw next
+    lda MC_COL2_SPLIT             ; frame starts from the right colours) and
+    sta MC_COL2_TOP                ; reset the split line back to near the top
+    lda #$2F                        ; ($2F) for the next frame's first split.
 
-L8445:
+ARM_RASTER_SPLIT:
     sta VIC_RASTER
     sta SPLIT_RASTER
     lda #$C3
-    sta VEC_IRQ
+    sta VEC_IRQ         ; re-point the IRQ vector to $83C3 = IRQ_TOP_PANEL...
     lda #$83
-    sta VEC_IRQ_HI
+    sta VEC_IRQ_HI      ; ...so THAT handler runs at the next split
     lda #$01
-    sta VIC_IRR
-    cli
+    sta VIC_IRR         ; acknowledge this raster interrupt
+    cli                 ; interrupts back on early - the rest of this handler
+                        ;   can safely be pre-empted by the next raster split
     lda #$1B
-    sta D011_SHADOW
+    sta D011_SHADOW     ; screen back on/25 rows for the next frame's redraw
     lda #$9A
-    sta D018_SHADOW
+    sta D018_SHADOW     ; back to the title/panel screen+charset pointer
     lda COPY_BLOCK_FLAG
-    beq L84D2
-    ldy #$1F
+    beq IRQ_MAIN_DONE
+    ldy #$1F            ; COPY_BLOCK_FLAG set -> one 32-byte block to copy
 
-L8468:
+; Copy 32 bytes from SCROLL_SRC to SCROLL_DST - a small, fast, once-per-IRQ
+; chunk of the road-scrolling copy (the full row copy happens across several
+; IRQs, not all at once, to keep each individual IRQ short).
+BLOCK_COPY_LOOP:
     lda (SCROLL_SRC),y
     sta (SCROLL_DST),y
     dey
-    bpl L8468
+    bpl BLOCK_COPY_LOOP
     iny
     sty COPY_BLOCK_FLAG
     ldy #$1F
 
-L8474:
+; Sprite multiplexing: the VIC chip only has 8 hardware sprites, but this
+; game shows far more moving objects than that by repositioning sprites
+; partway down the screen (once one enemy has scrolled past, its sprite can
+; be re-used lower down for another). SPRMUX_CNT (and its 3 sister arrays,
+; SPRMUX_CNT1-3) hold a per-row-band countdown; this loop walks all 32 bands
+; (y = $1F downto 0) and, for any band still counting down, calls SPEEDCODE
+; (the fast RAM routine that actually repositions the sprite for this band)
+; and paints a status-colour cell, then ticks the countdown down by one.
+SPRITE_MUX_ROW_LOOP:
     lda a:SPRMUX_CNT,y
-    beq L8485
+    beq SPRITE_MUX_ROW_NEXT
     jsr SPEEDCODE
     lda #$0E
     sta COLOR_RAM+HISCORE_HI,y
@@ -1328,32 +1369,39 @@ L8474:
     tax
     dec SPRMUX_CNT,x
 
-L8485:
+SPRITE_MUX_ROW_NEXT:
     dey
-    bpl L8474
+    bpl SPRITE_MUX_ROW_LOOP
     lda ROW_REPEAT
     ldy #$14
     cmp #$01
-    bne L849E
-    lda ROAD_FEATURE
-    cmp #$15
-    beq L84AA
+    bne CONSUME_ARMED_ROW   ; only act below on the LAST row of a row-repeat
+    lda ROAD_FEATURE         ;   cycle (see claude/Boat_River_Notes.md for the
+    cmp #$15                  ;   full write-up of what this does)
+    beq STORE_ARMED_ROW        ; feature $15 (water-exit trigger): Y stays $14
     cmp #$13
-    bne L84C9
-    ldy #$04
-    bne L84AA
+    bne IRQ_MAIN_TAIL
+    ldy #$04                    ; feature $13 (water-entry trigger): Y = $04
+    bne STORE_ARMED_ROW
 
-L849E:
+; Neither trigger fired this pass - instead, pick up whatever row band was
+; armed by a PREVIOUS pass (STATE_4D18) and finish arming it now, one frame
+; later, then clear the "pending" flag so this only fires once.
+CONSUME_ARMED_ROW:
     ldy STATE_4D18
-    beq L84C9
+    beq IRQ_MAIN_TAIL
     lda #$00
     sta STATE_4D18
-    beq L84AD
+    beq PAINT_AND_ARM_MUX
 
-L84AA:
-    sty STATE_4D18
+STORE_ARMED_ROW:
+    sty STATE_4D18      ; remember which row band to finish arming next pass
 
-L84AD:
+; Paint a 4-cell colour-RAM block and re-arm all four SPRMUX_CNT* arrays for
+; 25 ($19) rows starting at row Y - see claude/Boat_River_Notes.md: this is
+; what schedules the extra multiplexed sprites right at the river's entry
+; and exit points (e.g. the random enemy-boat spawn).
+PAINT_AND_ARM_MUX:
     lda #$0A
     sta COLOR_RAM+HISCORE_HI,y
     sta COLOR_RAM+BIT_MASK,y
@@ -1365,95 +1413,125 @@ L84AD:
     sta a:SPRMUX_CNT2,y
     sta a:SPRMUX_CNT3,y
 
-L84C9:
-    jsr SCROLL_DISPATCH
+IRQ_MAIN_TAIL:
+    jsr SCROLL_DISPATCH ; run this frame's road-scroll routine (via VEC_SCROLL)
     jsr UPDATE_HAZARDS
     inc FRAME_SUBCTR
 
-L84D2:
+IRQ_MAIN_DONE:
     jmp IRQ_EXIT
 
 ; -----------------------------------------------------------------------
-; Bottom-of-frame path of the IRQ: advance scroll, step road-segment tables.
-; The per-segment template row (SCROLL_SRC, from OBJ_ADDR at L85B7) defines the
-; whole road row incl. its MARGIN tiles - grass on land, water tiles ($06-$13)
-; on the bridge/water segments - so water is part of the scrolling road map.
+; Bottom-of-frame path of the IRQ: advance the road's vertical scroll one
+; step, and - once it's scrolled a full character row - step the road-segment
+; engine on to the next row (or the next SEGMENT, when the current one runs
+; out). This is the routine documented in depth in claude/Road_Map_Decode.md:
+; a level is a linked graph of "segments" (ROAD_SEG_TBL), each a short list
+; of per-row "feature" codes (ROAD_FEATURE) that select that row's graphics.
+; The per-segment template row (SCROLL_SRC, set below at READ_ROAD_ROW) covers
+; the WHOLE row including its margins - grass on land, water tiles ($06-$13)
+; on the bridge/water segments - so water is just ordinary map data, not a
+; special layer (see claude/Water_Bridge_Notes.md / Boat_River_Notes.md).
 IRQ_BOTTOM_SCROLL:
     lda #$00
-    sta VIC_BORDER
+    sta VIC_BORDER      ; play-area colours while the road/game logic runs
     sta VIC_BG0
     lda #$01
     sta VIC_BG1
     lda #$08
     sta VIC_BG2
-    inc FRAME_FLAG
+    inc FRAME_FLAG      ; signal "a new frame happened" - GAME_LOOP's
+                        ;   WAIT_FRAME_TIMER polls this to pace the game loop
     lda SPLIT_RASTER
     clc
-    adc SCROLL_SPEED
-    sta SPLIT_RASTER
+    adc SCROLL_SPEED    ; the screen split drifts down with the scroll speed
+    sta SPLIT_RASTER    ;   too, so the panel/play boundary tracks smoothly
     lda D018_ALT
     sta D018_SHADOW
     lda FLAG_FB
-    beq L8500
-    lda SPAWN_Y
-    clc
+    beq ADVANCE_VSCROLL
+    lda SPAWN_Y         ; (???) if FLAG_FB is set, some spawn point also
+    clc                  ;   drifts down at the same rate as the road
     adc SCROLL_SPEED
     sta SPAWN_Y
 
-L8500:
+; Add SCROLL_SPEED to the fine (pixel-level, 0-7) scroll offset. If that
+; pushes it past 7 (a whole character cell), the carry comes out set - that's
+; the signal to step the road forward a full row below; otherwise this frame
+; only needed the smooth pixel-scroll, so skip straight to the tail.
+ADVANCE_VSCROLL:
     lda VSCROLL_POS
     and #$07
     clc
     adc SCROLL_SPEED
     cmp #$08
-    php
-    and #$07
-    ora #$10
+    php                 ; stash the carry (crossed a row?) - AND/ORA below
+                        ;   would otherwise clobber the flag before it's used
+    and #$07            ; keep only the fine-scroll bits (wrap 0-7)
+    ora #$10            ; combine with the fixed screen-control bits
     sta VSCROLL_POS
     sta D011_SHADOW
-    plp
-    bcs L8518
-    jmp L8606
+    plp                 ; get the "crossed a row" carry back
+    bcs ADVANCE_ROW
+    jmp IRQ_BOTTOM_TAIL  ; pixel-scroll only this frame - nothing else to do
 
-L8518:
+; A full row has scrolled past: count down ROW_REPEAT (how many more times
+; this same template row repeats) and, if it's not done yet, just advance
+; the read pointer to the next 32-byte row within the same template.
+ADVANCE_ROW:
     dec ROW_REPEAT
-    beq L852A
+    beq ROW_REPEAT_DONE
     lda SCROLL_SRC
     clc
-    adc #$20
+    adc #$20            ; +32 bytes = next row of this feature's template
     sta SCROLL_SRC
-    bcc L8527
+    bcc FINISH_ROW_STEP
     inc SCROLL_SRC_HI
 
-L8527:
-    jmp L85DD
+FINISH_ROW_STEP:
+    jmp FINISH_ROW_AND_TOGGLE_BUFFER
 
-L852A:
+; This row-repeat cycle is used up: count down SEG_REPEAT (how many more
+; times to repeat the WHOLE row-repeat cycle). If more remain, reset
+; ROW_REPEAT and rewind SCROLL_SRC back to the saved start of this template -
+; i.e. loop the same short template again (this is how a long straight
+; stretch of road is built from one small graphic, repeated many times).
+ROW_REPEAT_DONE:
     dec SEG_REPEAT
-    beq L853F
+    beq ADVANCE_ROAD_SEGMENT
     lda SEG_REPEAT_INIT
     sta ROW_REPEAT
     lda SCROLL_SRC_SAVE
     sta SCROLL_SRC
     lda SCROLL_SRC_SAVE_HI
     sta SCROLL_SRC_HI
-    beq L853F
-    jmp L85DD
+    beq ADVANCE_ROAD_SEGMENT
+    jmp FINISH_ROW_AND_TOGGLE_BUFFER
 
-L853F:
+; Both repeat counts are exhausted: move on to the next ROW within the
+; current road segment (ROAD_SEG_LEN), or - once the whole segment's rows
+; are used up - walk the segment graph to pick the NEXT segment. This is the
+; fork mechanism from claude/Road_Map_Decode.md: ROAD_SEG_TBL stores TWO
+; next-segment ids per entry (main/branch); SCENE_IDX >= $13 selects the
+; branch (steering right), otherwise the main path (steering left).
+ADVANCE_ROAD_SEGMENT:
     lda #$17
     sta STATE_4D10
     dec ROAD_SEG_LEN
-    bne L85B7
+    bne READ_ROAD_ROW   ; more rows left in this segment -> just read the next one
     lda ROAD_SEG_IDX
-    asl a
+    asl a               ; x2: each segment has a (main, branch) PAIR of entries
     tay
     lda SCENE_IDX
     cmp #$13
-    bcc L8553
-    iny
+    bcc LOAD_NEXT_SEGMENT   ; SCENE_IDX < $13 -> keep the even (main) entry
+    iny                      ; SCENE_IDX >= $13 -> odd (branch) entry instead
 
-L8553:
+; Load the chosen next segment's row-pointer and length, then a few one-off
+; side effects keyed to specific segment ids reached (lap/loop bookkeeping,
+; and what look like scripted road-sign timers - see the header's ROAD MAP
+; notes and claude/Road_Map_Decode.md for the fully-traced feature codes).
+LOAD_NEXT_SEGMENT:
     lda ROAD_SEG_TBL,y
     sta ROAD_SEG_IDX
     tay
@@ -1463,38 +1541,46 @@ L8553:
     sta ROAD_PTR_HI
     lda ROAD_LEN_TBL,y
     sta ROAD_SEG_LEN
-    cpy #$1C
-    bne L857C
-    inc ROAD_PHASE
+    cpy #$1C            ; segment $1C is where the main path loops back to
+    bne APPLY_ROAD_PHASE    ; the start (per the decoded segment graph) -
+    inc ROAD_PHASE           ; treat reaching it as "completed a lap"
     ldx MUX_SLOT_IDX
-    bmi L857C
+    bmi APPLY_ROAD_PHASE
     sec
-    ror MUX_SLOT0,x
+    ror MUX_SLOT0,x     ; (???) some per-lap sprite-multiplex bookkeeping
     dec MUX_SLOT_IDX
     inc FLAG_DD
 
-L857C:
+APPLY_ROAD_PHASE:
     lda ROAD_PHASE
-    and #$03
+    and #$03            ; wrap to a 0-3 "phase" counter
     sta ROAD_PHASE
-    cpy #$0F
-    bne L8588
-    inc FX_TIMER1
+    cpy #$0F            ; segment $0F = the river-entrance segment
+    bne CHECK_SIGN_TIMER_SEG
+    inc FX_TIMER1        ; (???) likely arms a scripted road-sign/effect
 
-L8588:
+; (???) Segment $1B, only when ROAD_PHASE==1: pick FX_TIMER2 or FX_TIMER3
+; depending on which fork (SCENE_IDX) got here - candidate for arming one of
+; the road-sign messages in ONROAD_MSG_TBL (DETOUR/BRIDGE OUT/ICY ROADS
+; etc., see the header's ON-ROAD TEXT notes), not confirmed.
+CHECK_SIGN_TIMER_SEG:
     cpy #$1B
-    bne L859B
-    cmp #$01
-    bne L859B
+    bne APPLY_SEGMENT_PALETTE
+    cmp #$01            ; (A still holds ROAD_PHASE&3 from above)
+    bne APPLY_SEGMENT_PALETTE
     ldx SCENE_IDX
     cpx #$13
-    bcs L8599
+    bcs SIGN_TIMER_B
     inc FX_TIMER2
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
-L8599:
+SIGN_TIMER_B:
     inc FX_TIMER3
 
-L859B:
+; Combine ROAD_PHASE with this segment's ROAD_COLIDX_TBL entry to pick the
+; row's palette variant, then apply the split-screen border/multicolours -
+; this is what gives different stretches of road (and the bridge/water
+; sections) their distinct look (see claude/Water_Bridge_Notes.md).
+APPLY_SEGMENT_PALETTE:
     clc
     adc ROAD_COLIDX_TBL,y
     tay
@@ -1505,12 +1591,19 @@ L859B:
     lda ROAD_MC2_TBL,y
     sta MC_COL2_SPLIT
     lda SCROLL_SPEED
-    lsr a
+    lsr a               ; half the scroll speed...
     clc
-    adc #$2F
+    adc #$2F            ; ...offset from the panel/play split baseline
     sta SPLIT_RASTER
 
-L85B7:
+; Read this row's feature code and look up its graphics: the exact mechanism
+; fully documented in claude/Road_Map_Decode.md and claude/Boat_River_Notes.md
+; - the row list is walked BACKWARDS (dey first), each ROAD_FEATURE byte
+; indexes the 16-entry OBJ_ADDR_LO/HI/OBJ_ROWREP_TBL/OBJ_SEGREP_TBL tables
+; (codes $00-$0F; $10+ are special scripted trigger codes handled elsewhere,
+; e.g. UPDATE_SCENE_SELECT) to pick this row's SCROLL_SRC template pointer
+; and repeat counts.
+READ_ROAD_ROW:
     ldy ROAD_SEG_LEN
     dey
     lda ROAD_FEATURE
@@ -1530,7 +1623,11 @@ L85B7:
     lda OBJ_SEGREP_TBL,y
     sta SEG_REPEAT
 
-L85DD:
+; Arm the 32-byte-per-IRQ block copy (consumed back in IRQ_MAIN's
+; BLOCK_COPY_LOOP) and flip between the two screen buffers/scroll routines
+; every other IRQ - a form of double buffering so the row currently being
+; copied in isn't the same one currently on screen.
+FINISH_ROW_AND_TOGGLE_BUFFER:
     inc COPY_BLOCK_FLAG
     lda D018_ALT
     eor #$10
@@ -1549,15 +1646,21 @@ L85DD:
     lda SCROLL_VEC_TBL_D,y
     sta VEC_SCROLL_HI
 
-L8606:
+IRQ_BOTTOM_TAIL:
     lda #$06
-    sta VIC_RASTER
+    sta VIC_RASTER      ; arm the very next raster line - keeps this IRQ
+                        ;   pair firing tightly near the top of the frame
     lda #$01
     sta VIC_IRR
-    jsr MUSIC_DRIVER
+    jsr MUSIC_DRIVER    ; advance the music/sound-effect player one tick
 
 ; -----------------------------------------------------------------------
-; Flip the IRQ_HALF top/bottom toggle and restore registers / RTI.
+; Flip the IRQ_HALF top/bottom toggle (EOR #$FF just inverts every bit - a
+; common way to toggle a flag between $00 and $FF) so next time IRQ_MAIN
+; fires, it takes the OTHER path (top-panel-arm vs. bottom-scroll) - this is
+; what keeps the pair of raster IRQs alternating all the way down the
+; screen. Then restore Y/X/A (reverse order from how they were pushed - the
+; stack is LIFO) and RTI back to normal execution.
 IRQ_EXIT:
     lda IRQ_HALF
     eor #$FF
@@ -1573,126 +1676,147 @@ IRQ_EXIT:
     .byte $04,$78,$01,$16,$04,$7C,$00,$04
 
 ; -----------------------------------------------------------------------
-; Draw the playfield border/frame characters into the screen buffers.
+; Draw the playfield border/frame by GENERATING a small machine-code routine
+; into RAM at $0400 and presumably running it elsewhere (not yet traced where
+; it's called from). This is a neat, slightly advanced 6502 trick worth
+; calling out: $AD is the opcode byte for "LDA absolute" and $8D is "STA
+; absolute" (each a 3-byte instruction: opcode + 2-byte address) - so each
+; 6-byte record DRAW_BOX_ROWS writes below is literally the bytes for
+; "LDA $srcaddr" followed by "STA $dstaddr", i.e. one COMPILED copy
+; instruction pair per character cell, and the whole generated routine is
+; terminated with a plain RTS ($60). Writing out the actual instructions like
+; this - instead of a generic loop that reads addresses from a table - trades
+; RAM for speed, since the CPU doesn't have to compute each address at
+; runtime. (ZTMP_0C/ZTMP_0D hold $AD/$8D - the two opcode bytes - across all
+; three calls below.)
 DRAW_PLAYFIELD_FRAME:
     lda #$20
-    sta ZTMP_09
+    sta ZTMP_09         ; cells per row (inner loop count)
     lda #$08
-    sta ZTMP_0A
+    sta ZTMP_0A         ; per-row address stride
     lda #$18
-    sta ZTMP_0B
+    sta ZTMP_0B         ; row count (outer loop count)
     lda #$AD
-    sta ZTMP_0C
+    sta ZTMP_0C         ; opcode byte: LDA absolute
     lda #$8D
-    sta ZTMP_0D
+    sta ZTMP_0D         ; opcode byte: STA absolute
     lda #$BB
     sta SRC_PTR
     lda #$7B
-    sta SRC_PTR_HI
+    sta SRC_PTR_HI      ; SRC_PTR = $7BBB (source screen cells)
     lda #$E3
     sta DST_PTR
     lda #$7F
-    sta DST_PTR_HI
+    sta DST_PTR_HI      ; DST_PTR = $7FE3 (destination screen cells)
     lda #$00
     sta DST2_PTR
     lda #$04
-    sta DST2_PTR_HI
-    jsr DRAW_BOX_ROWS
+    sta DST2_PTR_HI     ; DST2_PTR = $0400: where the generated code goes
+                        ;   (borrowed scratch RAM - this game's own screen
+                        ;   buffers live at $6400/$7800/$7C00, not $0400)
+    jsr DRAW_BOX_ROWS   ; generate the first box's copy instructions...
     lda #$BB
     sta SRC_PTR
     lda #$7F
-    sta SRC_PTR_HI
+    sta SRC_PTR_HI      ; ...then swap source/dest ($7FBB <-> $7BE3)...
     lda #$E3
     sta DST_PTR
     lda #$7B
     sta DST_PTR_HI
-    jsr DRAW_BOX_ROWS
+    jsr DRAW_BOX_ROWS   ; ...to generate a mirrored second box, appended
+                        ;   right after the first (DST2_PTR carries over)
     lda #$01
-    sta ZTMP_09
+    sta ZTMP_09         ; third box: just 1 cell per row...
     lda #$27
     sta ZTMP_0A
     lda #$B9
-    sta ZTMP_0C
-    lda #$99
-    sta ZTMP_0D
-    lda #$9C
+    sta ZTMP_0C         ; ...and different opcode/marker bytes ($B9/$99 -
+    lda #$99            ;   still valid 6502 opcodes: LDA abs,Y / STA abs,Y -
+    sta ZTMP_0D          ;   so this third box copies via a different
+    lda #$9C              ;   addressing mode)
     sta SRC_PTR
     lda #$DB
-    sta SRC_PTR_HI
+    sta SRC_PTR_HI      ; SRC_PTR = $DB9C, DST_PTR = $DBC4 (colour RAM area)
     lda #$C4
     sta DST_PTR
     lda #$DB
     sta DST_PTR_HI
+    ; falls straight into DRAW_BOX_ROWS - no jsr/rts between them, so this
+    ; third box reuses ZTMP_0B (row count) still set from the very first call
 
 ; -----------------------------------------------------------------------
-; Helper for DRAW_PLAYFIELD_FRAME: stamp a rectangular run of border cells.
+; Helper for DRAW_PLAYFIELD_FRAME: emit ZTMP_0B rows x ZTMP_09 columns of
+; compiled "LDA src / STA dst" instruction pairs into (DST2_PTR), stepping
+; SRC_PTR/DST_PTR back by 1 each column and by ZTMP_0A each row (so the
+; generated routine, once run, will copy a rectangular block of border
+; characters from one screen area to another).
 DRAW_BOX_ROWS:
     lda ZTMP_0B
-    sta ZTMP_08
+    sta ZTMP_08         ; row counter = ZTMP_0B (outer loop)
 
-L868F:
-    ldx ZTMP_09
+DRAW_BOX_ROW_LOOP:
+    ldx ZTMP_09         ; column counter = ZTMP_09 (inner loop)
 
-L8691:
+DRAW_BOX_CELL_LOOP:
     ldy #$00
     lda ZTMP_0C
-    sta (DST2_PTR),y
+    sta (DST2_PTR),y    ; emit the LDA-opcode byte
     iny
     lda SRC_PTR
-    sta (DST2_PTR),y
+    sta (DST2_PTR),y    ; emit its address operand, low byte...
     iny
     lda SRC_PTR_HI
-    sta (DST2_PTR),y
+    sta (DST2_PTR),y    ; ...and high byte
     iny
     lda ZTMP_0D
-    sta (DST2_PTR),y
+    sta (DST2_PTR),y    ; emit the STA-opcode byte
     iny
     lda DST_PTR
-    sta (DST2_PTR),y
+    sta (DST2_PTR),y    ; emit its address operand, low byte...
     iny
     lda DST_PTR_HI
-    sta (DST2_PTR),y
+    sta (DST2_PTR),y    ; ...and high byte (6 bytes written this pass)
     lda #$06
-    jsr PTR_AUX_ADD
+    jsr PTR_AUX_ADD     ; advance DST2_PTR past the instruction pair just written
     sec
     lda DST_PTR
     sbc #$01
-    sta DST_PTR
-    bcs L86C0
-    dec DST_PTR_HI
+    sta DST_PTR         ; step DST_PTR back one cell...
+    bcs DST_BORROW_DONE
+    dec DST_PTR_HI      ; ...borrowing into the high byte if needed
 
-L86C0:
+DST_BORROW_DONE:
     sec
     lda SRC_PTR
     sbc #$01
-    sta SRC_PTR
-    bcs L86CB
+    sta SRC_PTR         ; ...and SRC_PTR back one cell too
+    bcs SRC_BORROW_DONE
     dec SRC_PTR_HI
 
-L86CB:
+SRC_BORROW_DONE:
     dex
-    bne L8691
+    bne DRAW_BOX_CELL_LOOP
     sec
     lda DST_PTR
     sbc ZTMP_0A
-    sta DST_PTR
-    bcs L86D9
+    sta DST_PTR         ; end of a row: jump DST_PTR to the next row start...
+    bcs DST_ROW_BORROW_DONE
     dec DST_PTR_HI
 
-L86D9:
+DST_ROW_BORROW_DONE:
     sec
     lda SRC_PTR
     sbc ZTMP_0A
-    sta SRC_PTR
-    bcs L86E4
+    sta SRC_PTR         ; ...and SRC_PTR likewise
+    bcs SRC_ROW_BORROW_DONE
     dec SRC_PTR_HI
 
-L86E4:
+SRC_ROW_BORROW_DONE:
     dec ZTMP_08
-    bne L868F
+    bne DRAW_BOX_ROW_LOOP
     ldy #$00
     lda #$60
-    sta (DST2_PTR),y
+    sta (DST2_PTR),y    ; append RTS ($60) - terminates the generated routine
     jsr PTR_AUX_INC
     rts
 ; -----------------------------------------------------------------------
@@ -1709,31 +1833,46 @@ L86E4:
     .byte $85,$DA,$60
 
 ; -----------------------------------------------------------------------
-; Decompress a custom multicolour character set from a byte-stream.
+; Decompress a custom multicolour character set from a compressed byte-
+; stream (read via STREAM_NEXT_BYTE) into RAM at $5400+. This is a small
+; bytecode interpreter: it repeatedly reads one CONTROL byte and, depending
+; on whether it's negative/zero/positive, switches between several different
+; unpacking "modes" below (mirrored-pair writes, run-length block copies,
+; sparse byte patches, and a set of clever bit-shuffling tricks to build
+; extra characters cheaply). The exact meaning of some of the more intricate
+; bit-shift sequences isn't fully re-derived here - see the "(???)" notes -
+; but the overall mode structure and data flow is.
 UNPACK_CHARSET:
     lda #$00
     sta DST_PTR
     lda #$54
-    sta DST_PTR_HI
+    sta DST_PTR_HI      ; DST_PTR = $5400: base of the unpacked character set
 
-L878D:
+; Top of the per-character-block loop: read one control byte and dispatch.
+UNPACK_BLOCK_LOOP:
     lda DST_PTR
     sta SRC_PTR
     sta DST2_PTR
     lda DST_PTR_HI
     sta SRC_PTR_HI
-    sta DST2_PTR_HI
+    sta DST2_PTR_HI     ; SRC_PTR/DST2_PTR both start pointing at DST_PTR
     lda #$00
     sta ZTMP_09
     jsr STREAM_NEXT_BYTE
-    bmi L87A7
-    bne L87BC
-    jmp L888E
+    bmi MODE_MIRROR_PAIRS   ; control byte negative -> mode A
+    bne MODE_RUN_BLOCKS      ; positive, nonzero -> mode B
+    jmp ROTATE_CHARSET_ENTRY  ; zero -> the nibble-rotate mode further down
 
-L87A7:
+; Mode A: read 21 bytes from the stream, writing each one PLUS its bit-
+; mirrored twin (via MIRROR_BYTE - reverses the bit pairs, since multicolour
+; pixels are 2 bits each) into every third byte-pair of this character block
+; (offsets 0/1, 3/4, 6/7, ... up to $3E). (???: exact reason for the 1-byte
+; gap between each written pair not confirmed - possibly interleaving with
+; data written by a different pass.)
+MODE_MIRROR_PAIRS:
     ldy #$00
 
-L87A9:
+MIRROR_PAIR_LOOP:
     jsr STREAM_NEXT_BYTE
     sta (SRC_PTR),y
     iny
@@ -1742,105 +1881,138 @@ L87A9:
     iny
     iny
     cpy #$3F
-    bne L87A9
-    beq L87DC
+    bne MIRROR_PAIR_LOOP
+    beq MODE_MIRROR_MORE     ; (unconditional - cpy just left Z set)
 
-L87BC:
+; Mode B: the control byte is a repeat count (ZTMP_30); for each repeat,
+; read BLIT_COUNT (a fresh row count each pass) more bytes from the stream,
+; writing one every 3rd byte, then advance SRC_PTR to the next character.
+MODE_RUN_BLOCKS:
     sta ZTMP_30
     jsr STREAM_NEXT_BYTE
     sta BLIT_COUNT
 
-L87C3:
+RUN_BLOCK_OUTER:
     lda BLIT_COUNT
     sta BLIT_ROWS
     ldy #$00
 
-L87C9:
+RUN_BLOCK_INNER:
     jsr STREAM_NEXT_BYTE
     sta (SRC_PTR),y
     iny
     iny
     iny
     dec BLIT_ROWS
-    bne L87C9
+    bne RUN_BLOCK_INNER
     jsr PTR_SRC_INC
     dec ZTMP_30
-    bne L87C3
+    bne RUN_BLOCK_OUTER
 
-L87DC:
+; Common continuation after modes A and B: read the NEXT control byte to
+; decide what happens to this finished character block - move on to the next
+; one (mode 0), duplicate it into other character-set quadrants (negative),
+; or patch in a few extra bytes by hand (positive).
+MODE_MIRROR_MORE:
     jsr STREAM_NEXT_BYTE
-    bmi L8847
-    bne L87EB
+    bmi DUPLICATE_QUADRANTS
+    bne SPARSE_PATCH_SETUP
     lda #$40
-    jsr PTR_DST_ADD
-    jmp L878D
+    jsr PTR_DST_ADD     ; advance to the next character slot ($40 bytes on)
+    jmp UNPACK_BLOCK_LOOP
 
-L87EB:
+; Duplicate this character's first byte into the other three "quadrants"
+; of a related character-set region (offsets DST_PTR, DST_PTR+$40,
+; DST_PTR+$80, and - depending on X - DST_PTR+$C0). (???: which caller sets
+; X, and exactly what these four quadrants represent, not traced here.)
+SPARSE_PATCH_SETUP:
     lda #$40
     sta ZTMP_08
 
-L87EF:
+DUPLICATE_QUADRANT_LOOP:
     ldy #$00
     lda (DST_PTR),y
     ldy #$40
     sta (DST_PTR),y
     cpx #$02
-    beq L8801
-    bcc L8805
+    beq DUP_QUADRANT_80
+    bcc DUP_QUADRANT_NEXT
     ldy #$C0
     sta (DST_PTR),y
 
-L8801:
+DUP_QUADRANT_80:
     ldy #$80
     sta (DST_PTR),y
 
-L8805:
+DUP_QUADRANT_NEXT:
     jsr PTR_DST_INC
     dec ZTMP_08
-    bne L87EF
+    bne DUPLICATE_QUADRANT_LOOP
     stx ZTMP_09
 
-L880E:
+; Sparse patch mode: repeatedly read an (offset, value) pair from the
+; stream and poke VALUE directly at DST_PTR+offset, until a 0 offset byte
+; ends the list - a compact way to fix up a handful of individual bytes
+; without re-sending a whole character.
+SPARSE_PATCH_LOOP:
     jsr STREAM_NEXT_BYTE
-    beq L881C
+    beq SPARSE_PATCH_DONE
     tay
     jsr STREAM_NEXT_BYTE
     sta (DST_PTR),y
-    jmp L880E
+    jmp SPARSE_PATCH_LOOP
 
-L881C:
+SPARSE_PATCH_DONE:
     jsr STREAM_NEXT_BYTE
-    bne L8835
+    bne MODE_MIRROR_MORE2
     ldx ZTMP_09
 
-L8823:
+; Skip forward ZTMP_09 more character slots without unpacking anything into
+; them (presumably already filled by an earlier DUPLICATE_QUADRANT_LOOP
+; pass) - both the "source" (ZTMP_09-via-PTR_AUX_ADD) and destination
+; pointers step forward together.
+SKIP_CHARS_LOOP:
     lda #$40
     jsr PTR_AUX_ADD
     dex
-    beq L87DC
-    bmi L87DC
+    beq MODE_MIRROR_MORE     ; done skipping -> back to the main dispatch
+    bmi MODE_MIRROR_MORE
     lda #$40
     jsr PTR_DST_ADD
-    jmp L8823
+    jmp SKIP_CHARS_LOOP
 
-L8835:
+MODE_MIRROR_MORE2:
     tay
 
-L8836:
+; Like MODE_MIRROR_PAIRS above, but writing into DST2_PTR (this block's own
+; start) rather than SRC_PTR, and running until a zero stream byte ends it
+; instead of a fixed count.
+MIRROR_PAIRS_UNTIL_ZERO:
     jsr STREAM_NEXT_BYTE
-    beq L881C
+    beq SPARSE_PATCH_DONE
     sta (DST2_PTR),y
     iny
     jsr MIRROR_BYTE
     sta (DST2_PTR),y
     iny
     iny
-    bne L8836
+    bne MIRROR_PAIRS_UNTIL_ZERO
 
-L8847:
+; Build a byte-order-REVERSED, bit-mirrored copy of a 128-byte block into the
+; 128 bytes right after it (offsets $00-$7F copied+flipped to $80-$FF): the
+; first loop reads 3 source bytes at a time and writes their mirror images
+; far ahead (roughly +64 offset, converging on a 128-byte spacing overall);
+; the second pushes the first 128 bytes onto the stack then pops them back
+; off (LIFO - Last In, First Out, so popping reverses the order they went in)
+; mirroring each as it's stored into the second half. Net effect: a
+; horizontally + bit-flipped twin of the first half of this character block -
+; plausibly a mirror-image variant (e.g. facing the opposite direction) built
+; from one set of source graphics rather than storing both by hand. (???:
+; the precise offset arithmetic isn't independently re-derived step by step.)
+DUPLICATE_QUADRANTS:
     ldy #$00
 
-L8849:
+DUP_MIRROR_FORWARD_LOOP:
     lda (DST_PTR),y
     pha
     iny
@@ -1869,74 +2041,90 @@ L8849:
     sbc #$3F
     tay
     cpy #$3F
-    bne L8849
+    bne DUP_MIRROR_FORWARD_LOOP
     ldy #$00
-    pha
+    pha                 ; stash A as a spare stack entry - see the note below
 
-L8879:
+PUSH_HALF_BLOCK_LOOP:
     lda (DST_PTR),y
     pha
     iny
-    bpl L8879
-    pla
+    bpl PUSH_HALF_BLOCK_LOOP  ; pushes all 128 bytes ($00-$7F) onto the stack
+    pla                        ; discard the top one (the last byte pushed)
 
-L8880:
-    pla
-    jsr MIRROR_BYTE
+POP_MIRROR_REVERSE_LOOP:
+    pla                 ; pop the NEXT one down - LIFO means this walks back
+    jsr MIRROR_BYTE      ;   through the source bytes in REVERSE order
     sta (DST_PTR),y
     iny
-    bne L8880
+    bne POP_MIRROR_REVERSE_LOOP  ; y: $80 up to $FF, wrapping to 0 to stop
     inc DST_PTR_HI
-    jmp L878D
+    jmp UNPACK_BLOCK_LOOP
 
-L888E:
+; A second, separate transformation pass: read a (start, end) character-index
+; range from the stream, then for each character in that range, 4-bit-rotate
+; every byte and recombine adjacent bytes' rotated nibbles - the same
+; "rotate a byte by N bits using N x LSR/ROR" trick as elsewhere in this file,
+; applied here to build some derived/shifted variant of an existing
+; character block at $53C0+ (see ROTATE_CHARSET_INNER below). (???: exact
+; purpose of the resulting shifted characters not confirmed.)
+ROTATE_CHARSET_ENTRY:
     jsr STREAM_NEXT_BYTE
-    bne L8894
-    rts
+    bne ROTATE_CHARSET_RANGE_SETUP
+    rts                  ; control byte 0 -> nothing more to unpack, done
 
-L8894:
-    sta ZTMP_0B
+ROTATE_CHARSET_RANGE_SETUP:
+    sta ZTMP_0B         ; range start index
     jsr STREAM_NEXT_BYTE
-    sta ZTMP_0C
+    sta ZTMP_0C         ; range end index
 
-L889B:
+ROTATE_CHARSET_OUTER:
     lda #$C0
     sta SRC_PTR
     lda #$53
-    sta SRC_PTR_HI
+    sta SRC_PTR_HI      ; SRC_PTR = $53C0: base of the block being rotated
     ldx ZTMP_0B
     inc ZTMP_0B
     cpx ZTMP_0C
-    beq L888E
+    beq ROTATE_CHARSET_ENTRY  ; reached the end of the range -> read the next
+                              ;   control byte (loops the whole routine)
 
-L88AB:
+; Walk SRC_PTR forward $40 (64) bytes per index in X - a "multiply by
+; repeated addition" (X iterations of +$40) rather than a real multiply,
+; since the 6502 has no MUL instruction.
+ROTATE_CHARSET_CALC_SRC:
     lda #$40
     jsr PTR_SRC_ADD
     dex
-    bne L88AB
+    bne ROTATE_CHARSET_CALC_SRC
     ldy #$00
 
-L88B5:
+; For each pair of bytes in this character (63 bytes total), rotate the
+; first byte right by 4 bits (into ZTMP_09), rotate the second right by 4
+; bits (into ZTMP_0A), then combine: store (rotated byte1 | rotated byte0)
+; at the first position and the plain rotated byte1 at the next - shuffling
+; the two bytes' nibbles together.
+ROTATE_CHARSET_INNER:
     stx ZTMP_09
     stx ZTMP_0A
     lda (SRC_PTR),y
     ldx #$04
 
-L88BD:
+ROTATE_NIBBLE_A:
     lsr a
     ror ZTMP_09
     dex
-    bne L88BD
+    bne ROTATE_NIBBLE_A
     sta (SRC_PTR),y
     iny
     lda (SRC_PTR),y
     ldx #$04
 
-L88CA:
+ROTATE_NIBBLE_B:
     lsr a
     ror ZTMP_0A
     dex
-    bne L88CA
+    bne ROTATE_NIBBLE_B
     ora ZTMP_09
     sta (SRC_PTR),y
     iny
@@ -1944,8 +2132,8 @@ L88CA:
     sta (SRC_PTR),y
     iny
     cpy #$3F
-    bne L88B5
-    beq L889B
+    bne ROTATE_CHARSET_INNER
+    beq ROTATE_CHARSET_OUTER
 
 ; -----------------------------------------------------------------------
 ; Convert a moving object's world position to a screen cell and stage its sprite.

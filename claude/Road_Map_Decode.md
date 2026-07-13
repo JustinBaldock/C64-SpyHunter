@@ -1,7 +1,8 @@
 # Spy Hunter - Road / Level Map Decode
 
 The scrolling level is a **linked graph of road segments** in ROM, walked one segment at
-a time by the bottom-of-frame IRQ (`IRQ_BOTTOM_SCROLL`, label `L853F`). This doc decodes
+a time by the bottom-of-frame IRQ (`IRQ_BOTTOM_SCROLL`, specifically the segment-advance step
+now labelled `ADVANCE_ROAD_SEGMENT` at `$853F`). This doc decodes
 that structure. All snapshot values below use the corrected RAM extraction (see note at end).
 
 ## The engine (how a segment advances)

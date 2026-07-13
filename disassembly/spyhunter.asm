@@ -219,7 +219,8 @@
 ;     5. NPC boat state = OBJ_TBL63/6B/73 ($4D63/$4D6B/$4D73) all set to $02 for that
 ;        slot (vs. $00 for ordinary road enemies) - a shared car/boat locomotion flag.
 ;     6. ROAD_FEATURE $44=$14 (in the repeating segment $12/$13 water loop) is a
-;        traced RNG-gated random spawn: LA60E/LA62D roll ~2.3% (RNG>=$FA) per pass to
+;        traced RNG-gated random spawn: SPAWN_CHECK_ENTRY/RANDOM_SPAWN_ROLL
+;        (UPDATE_HAZARDS, Stage 6) roll ~2.3% (RNG>=$FA) per pass to
 ;        blit one of two small tile shapes ($A598/$A5BB) via DRAW_OBJECT_TILES's
 ;        blit params - confirmed by a randomly-encountered enemy boat (snapshot
 ;        "water enemyboat"). Full 31-segment row-by-row graph now in
@@ -1076,8 +1077,11 @@ GAME_CHOICE_MADE:
     sty GAME_STATE
     sty TWO_PLAYER          ; (???) both set to the same 1/2 choice value
     dey
-    beq MENU_DONE_1P        ; choice was 1 -> simple path
-    jmp LA274                ; choice was 2 -> extra setup (later section)
+    beq MENU_DONE_1P        ; choice was 1 -> clear the panel's right half
+    jmp CLEAR_PANEL_FULL     ; choice was 2 -> clear its left half instead
+                              ;   (CLEAR_PANEL_FULL's second entry point,
+                              ;   see the CLEAR_PANEL/CLEAR_PANEL_ALT note
+                              ;   near WAIT_FRAME_TIMER)
 
 MENU_DONE_1P:
     jmp CLEAR_PANEL_ALT
@@ -1210,8 +1214,9 @@ INIT_ALL_OBJECT_SLOTS_LOOP:
     sec
     rol BIT_MASK_INV
     bcs INIT_ALL_OBJECT_SLOTS_LOOP
-    jmp LA361            ; tail-jump onward (continues elsewhere, not covered
-                        ;   by this stage - that routine eventually rts's back)
+    jmp COPY_SPRITE_REGS ; tail-jump into the sprite-register push routine
+                        ;   (see the note above COPY_SPRITE_REGS, Stage 6) -
+                        ;   that routine's own RTS returns to our caller
 
 ; -----------------------------------------------------------------------
 ; Raster IRQ, top of frame ($83C3, vectored from IRQ_MAIN below). This is the
@@ -2938,135 +2943,195 @@ SET_SPRITE_PTR:
 
 ; -----------------------------------------------------------------------
 ; Pick the current road section / difficulty (SCENE_IDX) from game state.
+; Already partly documented from the road/river investigation (see the
+; spyhunter.asm header's ROAD MAP notes and claude/Road_Map_Decode.md) -
+; this is where ROAD_FEATURE $11/$13/$14/$15 get checked as scripted
+; triggers. Reading the full routine now (previously only its trigger
+; checks were traced): it does three unrelated things in sequence.
 UPDATE_SCENE_SELECT:
     lda SEQ_STATE
-    beq L9DEF
-    cmp #$06
-    bcs L9DEF
+    beq HERO_STATE_TRACK    ; SEQ_STATE 0 or >=6 -> skip the sign-cycle
+    cmp #$06                ;   logic below entirely, go straight to
+    bcs HERO_STATE_TRACK     ;   tracking the hero's state
     lda ROAD_SEG_IDX
-    cmp #$0F
-    beq L9DF6
+    cmp #$0F            ; segment $0F = the river-entrance segment
+    beq FRAME_SUBCTR_CHECK  ; -> skip the sign cycling here too
     lda ROAD_FEATURE
     cmp #$11
-    beq L9DDB
+    beq SIGN_CYCLE_ARM   ; feature $11 -> arm/advance the sign cycle
     lda PREV_FEATURE
     cmp #$15
-    beq L9DDB
+    beq SIGN_CYCLE_ARM   ; just left the water (feature $15) -> same
     lda #$00
-    sta STATE_4D17
-    beq L9DF6
+    sta STATE_4D17       ; otherwise, not near a trigger point: reset
+    beq FRAME_SUBCTR_CHECK   ; the "already armed this pass" flag
 
-L9DDB:
+; A 3-value round-robin counter (STATE_4D16: 3,2,1,3,2,1,...) that only
+; advances once per arming (guarded by STATE_4D17, so repeated frames at the
+; same trigger point don't re-advance it). Candidate: cycling through the
+; road-sign messages in ONROAD_MSG_TBL (DETOUR/BRIDGE OUT/ICY ROADS etc, see
+; the header's ON-ROAD TEXT notes) so consecutive river-entrance/exit
+; crossings show different signs. (???: not confirmed which sign maps to
+; which counter value.)
+SIGN_CYCLE_ARM:
     lda STATE_4D17
-    bne L9DF6
+    bne FRAME_SUBCTR_CHECK   ; already armed this pass -> don't re-advance
     ldy STATE_4D16
     tya
     dey
-    bne L9DE9
-    ldy #$03
+    bne SIGN_CYCLE_STORE
+    ldy #$03            ; wrapped past 1 -> back to 3
 
-L9DE9:
+SIGN_CYCLE_STORE:
     sty STATE_4D16
-    sta STATE_4D17
+    sta STATE_4D17      ; mark "armed" (nonzero) until reset above
 
-L9DEF:
+; Track the hero's own state into STATE_4DAC, but only while it's a "normal"
+; (bit 7 clear) value - the $80-$FF range is reserved for the hero/empty-slot
+; sentinel convention (claude/Dock_Exit_Notes.md), so this deliberately
+; skips recording those.
+HERO_STATE_TRACK:
     ldx HERO_STATE
-    bmi L9DF6
+    bmi FRAME_SUBCTR_CHECK
     stx STATE_4DAC
 
-L9DF6:
+; Every 6th frame, bump one of two STAT_CTR counters depending on whether
+; ROAD_FEATURE or PREV_FEATURE is currently $14 (the water-loop random-spawn
+; trigger, claude/Boat_River_Notes.md) - i.e. tallying frames spent in that
+; specific water-loop state vs. not. Purpose of the tally not confirmed
+; (possibly difficulty pacing or spawn-rate tuning). (???)
+FRAME_SUBCTR_CHECK:
     lda FRAME_SUBCTR
     cmp #$06
-    bcc L9E10
+    bcc SCENE_IDX_UPDATE
     ldx #$00
     stx FRAME_SUBCTR
     lda #$14
     cmp ROAD_FEATURE
-    beq L9E0D
+    beq STAT_CTR_BUMP
     cmp PREV_FEATURE
-    beq L9E0D
+    beq STAT_CTR_BUMP
     inx
 
-L9E0D:
+STAT_CTR_BUMP:
     inc STAT_CTR,x
 
-L9E10:
+; Recompute SCENE_IDX (the fork-selector variable that steers left/right at
+; road forks, per claude/Road_Map_Decode.md) from STATE_4DB9, but only near
+; specific segments (exactly $07, or $0F-$11) and only adjusted by whether
+; SCENE_ID is 5 or 6 (candidates: car vs. boat scene, given SCENE_ID is
+; documented elsewhere as "car/boat/..." - see the equates). Everywhere
+; else, SCENE_IDX is simply left as STATE_4DB9 unchanged.
+SCENE_IDX_UPDATE:
     lda STATE_4DB9
     ldy #$12
     ldx ROAD_SEG_IDX
     cpx #$07
-    beq L9E23
+    beq SCENE_ID_CHECK
     cpx #$0F
-    bcc L9E2F
+    bcc SCENE_IDX_STORE     ; segment < $0F -> just store STATE_4DB9 as-is
     cpx #$12
-    bcs L9E2F
+    bcs SCENE_IDX_STORE     ; segment >= $12 -> same
 
-L9E23:
+SCENE_ID_CHECK:
     ldx SCENE_ID
     cpx #$06
-    beq L9E2E
+    beq SCENE_IDX_FROM_Y
     cpx #$05
-    bne L9E31
-    iny
+    bne SCENE_IDX_DONE   ; SCENE_ID isn't 5 or 6 -> leave SCENE_IDX untouched
+    iny                   ; SCENE_ID==5 -> Y=$13 instead of $12
 
-L9E2E:
+SCENE_IDX_FROM_Y:
     tya
 
-L9E2F:
+SCENE_IDX_STORE:
     sta SCENE_IDX
 
-L9E31:
+SCENE_IDX_DONE:
     rts
 
 ; -----------------------------------------------------------------------
-; Decode the road/scene layout stream into RAM (runs + mirrored rows).
+; Decode the road/scene layout stream (another compressed byte-stream
+; interpreter, same overall style as UNPACK_CHARSET) into the road template
+; RAM at $2980+ - the exact area later read as SCROLL_SRC by the road-scroll
+; IRQ (READ_ROAD_ROW, claude/Road_Map_Decode.md) and referenced as the
+; OBJ_ADDR_LO/HI table target. In short: this BUILDS the per-feature road
+; row graphics that the scrolling engine later just points at; the game
+; doesn't ship every road row as a full bitmap, it ships this much smaller
+; compressed description and expands it once at startup.
+;
+; Top-level modes (each driven by a control byte from STREAM_NEXT_BYTE):
+;  - literal/run bytes into the current 32-byte destination row
+;  - mirrored duplication of part of a row (EOR #$01 - toggles between a
+;    tile and its horizontal-mirror pair, same trick as MIRROR_BYTE)
+;  - repeat the previous 32-byte row range N times (a cheap way to draw a
+;    long straight stretch without repeating the same block many times)
+;  - row mirroring/flipping against the previous row (DRAW_MIRROR_ROWS /
+;    DRAW_FLIP_ROWS below) - building the OTHER side of a symmetric road
+;    from one side's data
+;  - a final "expand object templates" pass (MAP_EXPAND_RUN/MAP_COPY_BLOCK)
+;    that blits smaller per-object graphics (OBJ_ADDR_LO/HI - the exact
+;    16-entry table decoded in claude/Road_Map_Decode.md) into place
+;  - a random "texture jitter" pass (RNG_NEXT-driven) that perturbs certain
+;    tile codes in a range, giving the water/road texture some organic
+;    variation instead of looking perfectly uniform
 UNPACK_MAP_DATA:
     lda #$60
     sta MAP_SRC
     lda #$29
-    sta MAP_SRC_HI
+    sta MAP_SRC_HI      ; MAP_SRC = $2960 (previous-row scratch)
     lda #$80
     sta MAP_DST
     sta MAP_ROW
     lda #$29
-    sta MAP_DST_HI
-    sta MAP_ROW_HI
+    sta MAP_DST_HI      ; MAP_DST = MAP_ROW = $2980 (destination, matches
+    sta MAP_ROW_HI       ;   OBJ_ADDR_LO/HI's base address exactly)
     lda #$CB
     sta STREAM_PTR
     lda #$AD
-    sta STREAM_PTR_HI
+    sta STREAM_PTR_HI   ; compressed source stream starts at $ADCB (ROM)
     ldy #$00
 
-L9E50:
+; Literal-row mode: fill 32 bytes at MAP_DST. Each source byte is either
+; used directly (values $40+) or triggers reading ONE MORE stream byte to
+; use instead (values $00-$13, i.e. treated as a 1-byte "repeat count" of 1 -
+; effectively a small escape range reserved for values that would otherwise
+; be ambiguous with control bytes elsewhere in this format).
+ROW_FILL_ENTRY:
     jsr STREAM_NEXT_BYTE
-    bne L9E59
-    beq L9E70
+    bne ROW_FILL_START
+    beq ROW_BLOCK_REPEAT   ; (unconditional - control byte was 0)
 
-L9E57:
+ROW_FILL_RESTART:
     ldy #$00
 
-L9E59:
+ROW_FILL_START:
     ldx #$01
     cmp #$14
-    bcc L9E63
+    bcc ROW_FILL_ESCAPE
     cmp #$40
-    bcc L9E68
+    bcc ROW_FILL_STORE
 
-L9E63:
+ROW_FILL_ESCAPE:
     pha
     jsr STREAM_NEXT_BYTE
     pla
 
-L9E68:
+ROW_FILL_STORE:
     sta (MAP_DST),y
     iny
     dex
-    bne L9E68
-    beq L9E50
+    bne ROW_FILL_STORE  ; (dex from ldx#$01 -> this only ever runs once per
+                        ;   byte - X isn't a real "fill count" here)
+    beq ROW_FILL_ENTRY
 
-L9E70:
+; Mirror mode: read a control byte; if its top bit is clear, skip straight
+; to the block-repeat step below. Otherwise, take the low 5 bits as a
+; repeat count and mirror-duplicate part of the just-written row (toggling
+; each tile's mirror-pair bit via EOR #$01) into the following bytes.
+ROW_BLOCK_REPEAT:
     jsr STREAM_NEXT_BYTE
-    bpl L9E90
+    bpl COPY_PREV_ROWS
     and #$1F
     tax
     lda #$0F
@@ -3074,7 +3139,7 @@ L9E70:
     lda #$10
     sta ZTMP_0A
 
-L9E80:
+MIRROR_ROW_LOOP:
     ldy ZTMP_09
     lda (MAP_DST),y
     eor #$01
@@ -3082,39 +3147,47 @@ L9E80:
     sta (MAP_DST),y
     inc ZTMP_0A
     dec ZTMP_09
-    bpl L9E80
+    bpl MIRROR_ROW_LOOP
 
-L9E90:
+; Block-repeat: copy the 32-byte row at MAP_SRC to MAP_DST, X times (X was
+; set above, either from the mirror step's repeat count or falls through as
+; 0/unset if that step was skipped) - the "repeat a straight stretch of
+; road" mechanism.
+COPY_PREV_ROWS:
     clc
     lda MAP_SRC
     adc #$20
     sta MAP_SRC
-    bcc L9E9B
+    bcc ROW_ADVANCE_DST
     inc MAP_SRC_HI
 
-L9E9B:
+ROW_ADVANCE_DST:
     clc
     lda MAP_DST
     adc #$20
     sta MAP_DST
-    bcc L9EA6
+    bcc ROW_REPEAT_CHECK
     inc MAP_DST_HI
 
-L9EA6:
+ROW_REPEAT_CHECK:
     dex
-    bmi L9EB4
+    bmi MAP_BLOCK_DONE
     ldy #$1F
 
-L9EAB:
+ROW_REPEAT_COPY:
     lda (MAP_SRC),y
     sta (MAP_DST),y
     dey
-    bpl L9EAB
-    bmi L9E90
+    bpl ROW_REPEAT_COPY
+    bmi COPY_PREV_ROWS  ; (unconditional - dey went negative to exit above)
 
-L9EB4:
+; A whole "block" of rows is finished: shuffle MAP_ROW/MAP_PREV bookkeeping
+; forward, then check the next control byte to decide whether to mirror
+; and/or flip this block against the previous one (building the opposite
+; side of a symmetric road segment), before looping back for the next block.
+MAP_BLOCK_DONE:
     jsr STREAM_NEXT_BYTE
-    bne L9E57
+    bne ROW_FILL_RESTART
     lda MAP_ROW
     sta MAP_PREV
     sta DST2_PTR
@@ -3133,26 +3206,31 @@ L9EB4:
     sbc #$00
     sta DST_PTR_HI
     jsr STREAM_NEXT_BYTE
-    beq L9EF5
-    bpl L9EE7
+    beq BLOCK_NEXT
+    bpl MIRROR_THEN_CHECK
     jsr DRAW_FLIP_ROWS
-    jmp L9EF5
+    jmp BLOCK_NEXT
 
-L9EE7:
+MIRROR_THEN_CHECK:
     jsr DRAW_MIRROR_ROWS
     jsr STREAM_NEXT_BYTE
-    beq L9EF5
+    beq BLOCK_NEXT
     jsr DRAW_FLIP_ROWS
     jsr DRAW_MIRROR_ROWS
 
-L9EF5:
+BLOCK_NEXT:
     jsr STREAM_NEXT_BYTE
-    beq L9EFD
-    jmp L9E57
+    beq OBJECT_EXPAND_ENTRY
+    jmp ROW_FILL_RESTART
 
-L9EFD:
+; Object-template expansion: read a chain of (width, height, dest, [src])
+; records; a zero src signals "run-length expand instead of copy" (handled
+; by MAP_EXPAND_RUN, which reads directly from OBJ_ADDR_LO/HI by feature
+; index rather than an explicit address). A zero width/count byte ends the
+; chain and falls into the road-texture randomiser below.
+OBJECT_EXPAND_ENTRY:
     jsr STREAM_NEXT_BYTE
-    beq L9F35
+    beq TEXTURE_JITTER_ENTRY
     sta ZTMP_30
     jsr STREAM_NEXT_BYTE
     sta BLIT_COUNT
@@ -3161,165 +3239,187 @@ L9EFD:
     jsr STREAM_NEXT_BYTE
     sta SCREEN_PTR
     jsr STREAM_NEXT_BYTE
-    beq L9F25
+    beq RUN_EXPAND_ENTRY
     sta SRC_PTR_HI
     jsr STREAM_NEXT_BYTE
     sta SRC_PTR
     jsr MAP_COPY_BLOCK
-    jmp L9EFD
+    jmp OBJECT_EXPAND_ENTRY
 
-L9F25:
+RUN_EXPAND_ENTRY:
     jsr STREAM_NEXT_BYTE
     sta ZTMP_0B
     jsr STREAM_NEXT_BYTE
     sta ZTMP_0C
     jsr MAP_EXPAND_RUN
-    jmp L9EFD
+    jmp OBJECT_EXPAND_ENTRY
 
-L9F35:
+; Road-texture randomiser: walk every byte in $2980-$5CFF and, for tile
+; codes in range $08-$13 (the water texture range, per
+; claude/Water_Bridge_Notes.md), replace with a fresh random pick from that
+; same range via RNG_NEXT - so the water's "rippling" texture isn't
+; perfectly uniform even though it's built from a repeating template. Once
+; done, COPY_PAGES duplicates the finished $4D00 pages to $C000 (matching
+; the "second graphics bank" address range identified for scripted-feature
+; rows $10+ in claude/Broken_Bridge_Notes.md / Road_Map_Decode.md).
+TEXTURE_JITTER_ENTRY:
     lda #$80
     sta SRC_PTR
     lda #$29
     sta SRC_PTR_HI
     ldx #$00
 
-L9F3F:
+TEXTURE_JITTER_LOOP:
     lda (SRC_PTR,x)
     cmp #$08
-    bcc L9F58
+    bcc TEXTURE_SPECIAL_RANGE
     cmp #$14
-    bcs L9F58
+    bcs TEXTURE_SPECIAL_RANGE
 
-L9F49:
+TEXTURE_RANDOM_PICK:
     jsr RNG_NEXT
     and #$0F
     sec
     sbc #$04
-    bmi L9F49
+    bmi TEXTURE_RANDOM_PICK   ; reject/retry until the result is in range
     clc
-    adc #$08
-    bne L9F79
+    adc #$08            ; -> a fresh random value in $08-$13
+    bne TEXTURE_JITTER_STORE   ; (unconditional - adding #$08 to 0-11 is never 0)
 
-L9F58:
+; A second, narrower tile range ($14-$2B) gets a different, less-random
+; nudge (+-4) roughly every 8th byte (via a running counter's bit 3) -
+; likely a subtler variation for a different texture family (e.g. road
+; surface rather than water).
+TEXTURE_SPECIAL_RANGE:
     pha
     cmp #$14
-    bcc L9F7E
+    bcc TEXTURE_JITTER_SKIP
     cmp #$2C
-    bcs L9F7E
+    bcs TEXTURE_JITTER_SKIP
     inc ZTMP_09
     lda ZTMP_09
     and #$08
-    bne L9F7E
+    bne TEXTURE_JITTER_SKIP
     pla
     pha
     and #$04
-    bne L9F75
+    bne TEXTURE_NUDGE_UP
     pla
     sec
     sbc #$04
-    bne L9F79
+    bne TEXTURE_JITTER_STORE
 
-L9F75:
+TEXTURE_NUDGE_UP:
     pla
     clc
     adc #$04
 
-L9F79:
+TEXTURE_JITTER_STORE:
     sta (SRC_PTR,x)
-    jmp L9F7F
+    jmp TEXTURE_JITTER_NEXT
 
-L9F7E:
+TEXTURE_JITTER_SKIP:
     pla
 
-L9F7F:
+TEXTURE_JITTER_NEXT:
     jsr PTR_SRC_INC
     lda SRC_PTR_HI
     cmp #$5D
-    bcc L9F3F
+    bcc TEXTURE_JITTER_LOOP
     lda #$4D
     ldy #$C0
     ldx #$10
     jmp COPY_PAGES
 
+; Helper for the block-mirror step above: mirror-duplicate ($EOR #$01) each
+; byte of the block starting at DST2_PTR into SRC_PTR, row by row, until
+; DST2_PTR reaches MAP_ROW (the top of the block being mirrored).
 DRAW_MIRROR_ROWS:
     ldx #$00
 
-L9F93:
+MIRROR_ROWS_OUTER:
     ldy #$1F
 
-L9F95:
+MIRROR_ROWS_INNER:
     lda (DST2_PTR,x)
     eor #$01
     sta (SRC_PTR),y
     jsr PTR_AUX_INC
     lda DST2_PTR_HI
     cmp MAP_ROW_HI
-    bne L9FAA
+    bne MIRROR_ROWS_CONTINUE
     lda DST2_PTR
     cmp MAP_ROW
-    beq L9FFB
+    beq FLIP_MIRROR_DONE
 
-L9FAA:
+MIRROR_ROWS_CONTINUE:
     dey
-    bpl L9F95
+    bpl MIRROR_ROWS_INNER
     lda #$20
     jsr PTR_SRC_ADD
-    jmp L9F93
+    jmp MIRROR_ROWS_OUTER
 
+; Helper for the block-flip step: similar row walk, but instead of a
+; straight mirror it re-maps certain tile ranges ($14-$2B, +-4 shift based
+; on bit 2) before an EOR #$02 - building a left/right-flipped variant of
+; the road edge/shoulder tiles rather than a plain mirror.
 DRAW_FLIP_ROWS:
     ldx #$00
 
-L9FB7:
+FLIP_ROWS_OUTER:
     ldy #$1F
 
-L9FB9:
+FLIP_ROWS_INNER:
     lda (DST_PTR,x)
     cmp #$14
-    bcc L9FD3
+    bcc FLIP_TILE_REMAP
     cmp #$2C
-    bcs L9FD3
+    bcs FLIP_TILE_REMAP
     pha
     and #$04
-    bne L9FCF
+    bne FLIP_NUDGE_DOWN
     pla
     sec
     sbc #$04
-    jmp L9FD3
+    jmp FLIP_TILE_REMAP
 
-L9FCF:
+FLIP_NUDGE_DOWN:
     pla
     clc
     adc #$04
 
-L9FD3:
+FLIP_TILE_REMAP:
     eor #$02
     sta (SRC_PTR),y
     sec
     lda DST_PTR
     sbc #$01
     sta DST_PTR
-    bcs L9FE2
+    bcs FLIP_ROWS_HI_OK
     dec DST_PTR_HI
 
-L9FE2:
+FLIP_ROWS_HI_OK:
     lda DST_PTR_HI
     cmp MAP_PREV_HI
-    bcc L9FFB
-    beq L9FF5
+    bcc FLIP_MIRROR_DONE
+    beq FLIP_ROWS_CHECK_LO
 
-L9FEA:
+FLIP_ROWS_CONTINUE:
     dey
-    bpl L9FB9
+    bpl FLIP_ROWS_INNER
     lda #$20
     jsr PTR_SRC_ADD
-    jmp L9FB7
+    jmp FLIP_ROWS_OUTER
 
-L9FF5:
+FLIP_ROWS_CHECK_LO:
     lda DST_PTR
     cmp MAP_PREV
-    bcs L9FEA
+    bcs FLIP_ROWS_CONTINUE
 
-L9FFB:
+; Shared tail for both DRAW_MIRROR_ROWS and DRAW_FLIP_ROWS: advance
+; MAP_ROW/MAP_PREV/MAP_DST bookkeeping to just past the block that was
+; just built, ready for the next one.
+FLIP_MIRROR_DONE:
     lda MAP_ROW
     sta MAP_PREV
     sta DST2_PTR
@@ -3344,13 +3444,19 @@ L9FFB:
     sta MAP_DST_HI
     rts
 
+; Expand one road-FEATURE's template (indexed by ZTMP_0B, walking up to
+; ZTMP_0C) by run-length-copying it from OBJ_ADDR_LO/HI (claude/
+; Road_Map_Decode.md's 16-entry table) into place via MAP_COPY_BLOCK -
+; repeated BLIT_COUNT times per feature, i.e. this is what actually
+; materialises each feature code's road-row graphics into RAM at load time,
+; using the same table the runtime scroll engine later reads from.
 MAP_EXPAND_RUN:
     ldx ZTMP_0B
     cpx ZTMP_0C
-    bne LA033
-    jmp LA0C2
+    bne EXPAND_NEXT_FEATURE
+    jmp MAP_EXPAND_DONE
 
-LA033:
+EXPAND_NEXT_FEATURE:
     inc ZTMP_0B
     lda OBJ_ADDR_LO,x
     sta SRC_PTR
@@ -3361,45 +3467,45 @@ LA033:
     lda OBJ_ADDR_HI2,x
     sta DST_PTR_HI
     cpx #$0F
-    beq LA056
-    bcc LA05D
+    beq EXPAND_DST_ADJUST
+    bcc EXPAND_ROW_INIT
     sec
     lda SRC_PTR_HI
     sbc #$73
     sta SRC_PTR_HI
 
-LA056:
+EXPAND_DST_ADJUST:
     sec
     lda DST_PTR_HI
     sbc #$73
     sta DST_PTR_HI
 
-LA05D:
+EXPAND_ROW_INIT:
     lda #$00
     sta ZTMP_0A
 
-LA061:
+EXPAND_ROW_LOOP:
     ldy #$00
 
-LA063:
+EXPAND_BYTE_SCAN:
     lda (SRC_PTR),y
     iny
     cmp #$04
-    bcc LA06E
+    bcc EXPAND_ROW_END
     cmp #$08
-    bcc LA072
+    bcc EXPAND_CHECK_WIDTH
 
-LA06E:
+EXPAND_ROW_END:
     tya
-    jmp LA09C
+    jmp EXPAND_ADVANCE
 
-LA072:
+EXPAND_CHECK_WIDTH:
     cpy ZTMP_30
-    bne LA063
+    bne EXPAND_BYTE_SCAN
     inc ZTMP_0A
     lda BLIT_COUNT
     cmp ZTMP_0A
-    bne LA0AE
+    bne EXPAND_NEXT_ROW
     sec
     sbc #$01
     asl a
@@ -3407,75 +3513,78 @@ LA072:
     asl a
     asl a
     asl a
-    bcc LA08A
+    bcc EXPAND_ROLLBACK
     dec SRC_PTR_HI
 
-LA08A:
+EXPAND_ROLLBACK:
     sta BIT_MASK
     sec
     lda SRC_PTR
     sbc BIT_MASK
     sta SRC_PTR
-    bcs LA097
+    bcs EXPAND_DO_COPY
     dec SRC_PTR_HI
 
-LA097:
+EXPAND_DO_COPY:
     jsr MAP_COPY_BLOCK
     lda #$03
 
-LA09C:
+EXPAND_ADVANCE:
     jsr PTR_SRC_ADD
     lda SRC_PTR_HI
     cmp DST_PTR_HI
-    bcc LA05D
+    bcc EXPAND_ROW_INIT
     lda SRC_PTR
     cmp DST_PTR
-    bcc LA05D
+    bcc EXPAND_ROW_INIT
     jmp MAP_EXPAND_RUN
 
-LA0AE:
+EXPAND_NEXT_ROW:
     lda #$20
     jsr PTR_SRC_ADD
     lda SRC_PTR_HI
     cmp DST_PTR_HI
-    bcc LA061
+    bcc EXPAND_ROW_LOOP
     lda SRC_PTR
     cmp DST_PTR
-    bcc LA061
+    bcc EXPAND_ROW_LOOP
     jmp MAP_EXPAND_RUN
 
-LA0C2:
+MAP_EXPAND_DONE:
     rts
 
+; Copy BLIT_COUNT rows x ZTMP_30 bytes from SCREEN_PTR to SRC_PTR - a plain
+; rectangular block copy, used above by both the object-expansion chain and
+; MAP_EXPAND_RUN's run-length path.
 MAP_COPY_BLOCK:
     lda BLIT_COUNT
     sta BLIT_ROWS
     ldy #$00
     ldx #$00
 
-LA0CB:
+COPY_BLOCK_ROW:
     lda ZTMP_30
     sta BLIT_WIDTH
 
-LA0CF:
+COPY_BLOCK_BYTE:
     lda (SCREEN_PTR),y
     sta (SRC_PTR,x)
     iny
     dec BLIT_WIDTH
-    beq LA0DE
+    beq COPY_BLOCK_ROW_DONE
     jsr PTR_SRC_INC
-    jmp LA0CF
+    jmp COPY_BLOCK_BYTE
 
-LA0DE:
+COPY_BLOCK_ROW_DONE:
     dec BLIT_ROWS
-    beq LA0ED
+    beq MAP_COPY_BLOCK_DONE
     lda #$21
     sec
     sbc ZTMP_30
     jsr PTR_SRC_ADD
-    jmp LA0CB
+    jmp COPY_BLOCK_ROW
 
-LA0ED:
+MAP_COPY_BLOCK_DONE:
     rts
 ; -----------------------------------------------------------------------
 ; Small mirror/fill helper fragment stored as data.
@@ -3491,20 +3600,27 @@ RNG_NEXT:
     rts
 
 ; -----------------------------------------------------------------------
-; Fetch the next byte from STREAM_PTR and post-increment.
+; Fetch the next byte from STREAM_PTR and post-increment - the shared "read
+; one compressed byte" primitive behind UNPACK_CHARSET and UNPACK_MAP_DATA
+; above (X is used as a forced zero-page-indexed-indirect index, ",x" with
+; x=0, purely because that addressing mode is what's available - it isn't
+; walking an array).
 STREAM_NEXT_BYTE:
     ldx #$00
     lda (STREAM_PTR,x)
     inc STREAM_PTR
-    bne LA120
+    bne STREAM_NEXT_NO_CARRY
     inc STREAM_PTR_HI
 
-LA120:
+STREAM_NEXT_NO_CARRY:
     tax
     rts
 
 ; -----------------------------------------------------------------------
-; Advance SRC_PTR by 1 (PTR_SRC_INC) or by A (PTR_SRC_ADD).
+; Advance SRC_PTR by 1 (PTR_SRC_INC) or by A (PTR_SRC_ADD) - falling straight
+; through from the "+1" entry into the "+A" entry with A already loaded is a
+; common space-saving pattern in this file (one shared add/carry tail serves
+; both the "+1" and "+A" callers).
 PTR_SRC_INC:
     lda #$01
 
@@ -3512,14 +3628,14 @@ PTR_SRC_ADD:
     clc
     adc SRC_PTR
     sta SRC_PTR
-    bcc LA12D
+    bcc PTR_SRC_DONE
     inc SRC_PTR_HI
 
-LA12D:
+PTR_SRC_DONE:
     rts
 
 ; -----------------------------------------------------------------------
-; Advance DST_PTR by 1 or by A.
+; Advance DST_PTR by 1 or by A (same pattern as PTR_SRC_INC/ADD above).
 PTR_DST_INC:
     lda #$01
 
@@ -3527,14 +3643,14 @@ PTR_DST_ADD:
     clc
     adc DST_PTR
     sta DST_PTR
-    bcc LA139
+    bcc PTR_DST_DONE
     inc DST_PTR_HI
 
-LA139:
+PTR_DST_DONE:
     rts
 
 ; -----------------------------------------------------------------------
-; Advance DST2_PTR by 1 or by A.
+; Advance DST2_PTR by 1 or by A (same pattern again).
 PTR_AUX_INC:
     lda #$01
 
@@ -3542,24 +3658,27 @@ PTR_AUX_ADD:
     clc
     adc DST2_PTR
     sta DST2_PTR
-    bcc LA145
+    bcc PTR_AUX_DONE
     inc DST2_PTR_HI
 
-LA145:
+PTR_AUX_DONE:
     rts
 
 ; -----------------------------------------------------------------------
-; Charset builder helper: roll 2 bits of A into ZTMP_09.
+; Charset builder helper: roll the top 2 bits of A into ZTMP_09, 4 times
+; (i.e. rotate a whole byte's worth, 2 bits at a time) - part of the
+; ROM-charset-to-custom-multicolour-format repacking used by
+; BUILD_CHARSET_INNER (Stage 2).
 PACK_2BITS:
     ldx #$04
 
-LA148:
+PACK_2BITS_LOOP:
     clc
     rol ZTMP_09
     asl a
     rol ZTMP_09
     dex
-    bne LA148
+    bne PACK_2BITS_LOOP
     rts
 ; -----------------------------------------------------------------------
 ; Joystick / keyboard decode helper code and tables (feeds JOY_STATE), as data.
@@ -3572,15 +3691,20 @@ LA148:
     .byte $02,$CA,$CA,$E8,$8E,$09,$4D,$60
 
 ; -----------------------------------------------------------------------
-; Charset builder: emit a character and its mirrored twin into DST_PTR.
+; Charset builder: emit ZTMP_0C characters, each 8 bytes read from the
+; stream and written both as-is (top half of a 16-byte character-pair slot)
+; and mirrored (via MIRROR_BYTE); if ZTMP_0D (the flag byte passed in A) is
+; nonzero, the mirrored bytes are also stashed on the stack and written a
+; second time into the FOLLOWING character slot - building two related
+; characters (a shape and its mirror image) from one 8-byte source.
 BUILD_CHAR_PAIR:
     sta ZTMP_0D
 
-LA1BC:
+BUILD_CHAR_PAIR_OUTER:
     lda #$08
     sta ZTMP_0B
 
-LA1C0:
+BUILD_CHAR_PAIR_ROW:
     ldy #$00
     jsr STREAM_NEXT_BYTE
     sta (DST_PTR),y
@@ -3591,20 +3715,22 @@ LA1C0:
     sta (DST_PTR),y
     jsr PTR_DST_INC
     lda ZTMP_0D
-    bne LA1D9
+    bne BUILD_CHAR_PAIR_KEEP
     pla
-    pla
+    pla                 ; ZTMP_0D=0 -> discard the stashed bytes, don't
+                        ;   build the second character
 
-LA1D9:
+BUILD_CHAR_PAIR_KEEP:
     dec ZTMP_0B
-    bne LA1C0
+    bne BUILD_CHAR_PAIR_ROW
     lda #$08
     sta ZTMP_0B
     jsr PTR_DST_ADD
     lda ZTMP_0D
-    beq LA1FE
+    beq BUILD_CHAR_PAIR_NEXT
 
-LA1E8:
+; Pop the stashed bytes back off (LIFO order) into the second character slot.
+BUILD_CHAR_PAIR_TWIN:
     ldy #$08
     pla
     sta (DST_PTR),y
@@ -3613,21 +3739,24 @@ LA1E8:
     sta (DST_PTR),y
     jsr PTR_DST_INC
     dec ZTMP_0B
-    bne LA1E8
+    bne BUILD_CHAR_PAIR_TWIN
     lda #$08
     jsr PTR_DST_ADD
 
-LA1FE:
+BUILD_CHAR_PAIR_NEXT:
     dec ZTMP_0C
-    bne LA1BC
+    bne BUILD_CHAR_PAIR_OUTER
     rts
 
 ; -----------------------------------------------------------------------
-; Horizontally mirror a multicolour byte (swap the four 2-bit pixels).
+; Horizontally mirror a multicolour byte (swap the four 2-bit pixels): shift
+; each pair of bits out through the carry (ASL, stashed via PHP so the
+; second ASL doesn't clobber it) and ROR them into ZTMP_0A from the other
+; end - after 4 rounds the 4 pixel-pairs have been reversed end-to-end.
 MIRROR_BYTE:
     ldx #$04
 
-LA205:
+MIRROR_BYTE_LOOP:
     asl a
     php
     asl a
@@ -3635,12 +3764,13 @@ LA205:
     plp
     ror ZTMP_0A
     dex
-    bne LA205
+    bne MIRROR_BYTE_LOOP
     lda ZTMP_0A
     rts
 
 ; -----------------------------------------------------------------------
-; memcpy: copy X*256 bytes from SRC_PTR to DST_PTR (page-aligned).
+; memcpy: copy X*256 bytes from SRC_PTR to DST_PTR (page-aligned - the inner
+; loop copies a full 256-byte page at a time by just letting Y wrap $FF->$00).
 COPY_PAGES:
     sta SRC_PTR_HI
     sty DST_PTR_HI
@@ -3648,15 +3778,15 @@ COPY_PAGES:
     sty SRC_PTR
     sty DST_PTR
 
-LA21D:
+COPY_PAGES_LOOP:
     lda (SRC_PTR),y
     sta (DST_PTR),y
     iny
-    bne LA21D
+    bne COPY_PAGES_LOOP
     inc SRC_PTR_HI
     inc DST_PTR_HI
     dex
-    bne LA21D
+    bne COPY_PAGES_LOOP
     rts
 
 ; -----------------------------------------------------------------------
@@ -3673,25 +3803,25 @@ FILL_PAGES:
     ldy #$00
     sty SRC_PTR
 
-LA238:
+FILL_PAGES_LOOP:
     sta (SRC_PTR),y
     iny
-    bne LA238
+    bne FILL_PAGES_LOOP
     inc SRC_PTR_HI
     dex
-    bne LA238
+    bne FILL_PAGES_LOOP
     rts
 
 ; -----------------------------------------------------------------------
 ; Busy-wait some frames using the IRQ COPY_BLOCK_FLAG / FRAME_SUBCTR.
 DELAY_FRAMES:
     lda SCROLL_SPEED
-    bne LA249
+    bne DELAY_WAIT_COPY_FLAG
     inc SCROLL_SPEED
 
-LA249:
+DELAY_WAIT_COPY_FLAG:
     lda COPY_BLOCK_FLAG
-    beq LA249
+    beq DELAY_WAIT_COPY_FLAG
     lda #$0C
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
 DELAY_FRAMES_ALT:
@@ -3701,9 +3831,9 @@ DELAY_FRAMES_ALT:
     dex
     stx FRAME_SUBCTR
 
-LA25A:
+DELAY_WAIT_SUBCTR:
     cmp FRAME_SUBCTR
-    bne LA25A
+    bne DELAY_WAIT_SUBCTR
     stx SCROLL_SPEED
     rts
 
@@ -3713,13 +3843,13 @@ POLL_INPUT_FRAME:
     ldy FRAME_FLAG
     dey
 
-LA266:
+POLL_INPUT_LOOP:
     jsr SCAN_JOY_KEYS
-    bne LA270
+    bne POLL_INPUT_DONE
     cpy FRAME_FLAG
-    bne LA266
+    bne POLL_INPUT_LOOP
 
-LA270:
+POLL_INPUT_DONE:
     rts
 
 ; -----------------------------------------------------------------------
@@ -3727,18 +3857,18 @@ LA270:
 CLEAR_PANEL:
     jsr CLEAR_PANEL_ALT
 
-LA274:
+CLEAR_PANEL_FULL:
     ldx #$00
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
 CLEAR_PANEL_ALT:
     ldx #$12
     ldy #$0B
 
-LA27B:
+CLEAR_PANEL_LOOP:
     lda #$40
     jsr PANEL_PUT_CHAR_PAIR
     dey
-    bne LA27B
+    bne CLEAR_PANEL_LOOP
     rts
 
 ; -----------------------------------------------------------------------
@@ -3761,7 +3891,8 @@ RESET_SCROLL_VARS:
     sta SCENE_IDX
     rts
 ; -----------------------------------------------------------------------
-; Attract / road-reset helper code plus a $5Axx screen row-address table, as data.
+; Attract / road-reset helper CODE (not yet disassembled - same situation as
+; the larger blocks noted in Stage 5) plus a $5Axx screen row-address table.
     .byte $9E,$9F,$A0,$A1,$A2,$DE,$5B,$4D,$D0,$09,$A5,$FF,$30,$17,$D0,$04
     .byte $FE,$5B,$4D,$60,$A9,$FF,$85,$FF,$A9,$2D,$9D,$5B,$4D,$A0,$0A,$20
     .byte $82,$AA,$4C,$FE,$A2,$A9,$00,$85,$FF,$A0,$1E,$20,$82,$AA,$A5,$E8
@@ -3776,6 +3907,8 @@ RESET_SCROLL_VARS:
 ; Wait for the IRQ frame flag; every 4th frame decrement the BCD game timer.
 ; When GAME_TIME reaches 0 it sets EXTRA_LIFE_AVAIL=$FF (the timer-expired flag
 ; that hides the panel timer) and, on the car scene (SCENE_ID=$05), inc FLAG_FC.
+; This is the very first call in GAME_LOOP (Stage 2) - the whole game's pace
+; is set by this "wait for the IRQ to tick FRAME_FLAG" spin-loop.
 WAIT_FRAME_TIMER:
     lda FRAME_FLAG
     cmp #$02
@@ -3784,11 +3917,11 @@ WAIT_FRAME_TIMER:
     sta FRAME_FLAG
     inc FRAME_CTR
     lda TIMER_ENABLE
-    beq LA361
+    beq COPY_SPRITE_REGS
     lda FRAME_CTR
     and #$03
-    bne LA361
-    sed
+    bne COPY_SPRITE_REGS   ; only 1 frame in 4 actually decrements the timer
+    sed                 ; BCD subtraction (see the 6502 primer's BCD note)
     sec
     lda GAME_TIME_LO
     sbc #$01
@@ -3798,48 +3931,68 @@ WAIT_FRAME_TIMER:
     sbc #$00
     sta GAME_TIME_HI
     cld
-    bne LA361
+    bne COPY_SPRITE_REGS
     txa
-    bne LA361
+    bne COPY_SPRITE_REGS
     lda #$FF
     sta EXTRA_LIFE_AVAIL
     lda SCENE_ID
     cmp #$05
-    bne LA361
+    bne COPY_SPRITE_REGS
     inc FLAG_FC
 
 ; -----------------------------------------------------------------------
-; COPY_SPRITE_REGS: push staged sprite coords to $D000-$D010 and pointers to screens.
-LA361:
+; Push every staged sprite X/Y (SPR_X_SHADOW/SPR_Y_SHADOW) out to the real
+; VIC hardware sprite registers ($D000-$D010), then copy the sprite-pointer
+; shadow (SPRITE_PTRS) out to both play-buffer sprite-pointer areas
+; ($7BF8/$7FF8) - the one place per frame where all the position/graphics
+; work done elsewhere (OBJ_CALC_SCREEN_POS, PROCESS_OBJECTS, ...) actually
+; reaches the screen.
+COPY_SPRITE_REGS:
     ldy #$10
 
-LA363:
+COPY_SPRITE_XY_LOOP:
     lda a:SPR_X_SHADOW,y
     sta VIC_SPR0X,y
     dey
-    bpl LA363
+    bpl COPY_SPRITE_XY_LOOP
     ldx #$07
 
-LA36E:
+COPY_SPRITE_PTR_LOOP:
     lda SPRITE_PTRS,x
     sta SPRPTR_7800,x
     sta SPRPTR_7C00,x
     dex
-    bpl LA36E
+    bpl COPY_SPRITE_PTR_LOOP
     rts
 
 ; -----------------------------------------------------------------------
 ; Blit a multi-character object (car / weapons van / boat / smoke plume / the
-; on-road text messages from ONROAD_MSG_TBL, e.g. "GAME OVER") into the scrolling
-; $7800 screen buffer + colour RAM (never the ROM/road template), so blitted
-; content becomes MAP tiles that scroll with the road.
-; The BLIT_FLAGS high-bit path (LA408+) widens the shape row-by-row = smoke plume.
+; on-road text messages from ONROAD_MSG_TBL, e.g. "GAME OVER") into the
+; scrolling $7800 screen buffer + colour RAM (never the ROM/road template),
+; so blitted content becomes MAP tiles that scroll with the road. This is
+; the single shared blitter behind everything documented in
+; claude/Boat_River_Notes.md, Smoke_Weapon_Notes.md and
+; Game_Over_Text_Notes.md - it doesn't know or care WHAT it's drawing, just
+; where (BLIT_COL/BLIT_ROW), how big (BLIT_WIDTH/BLIT_ROWS), what colour
+; (OBJ_COLOR, 0 = "don't touch colour RAM"), and where to read the tile
+; bytes from (STREAM_PTR). The BLIT_FLAGS high-bit path (WIDEN_PLUME_ENTRY
+; below) grows the shape wider each row - the smoke-plume expansion effect.
 DRAW_OBJECT_TILES:
     ldx BLIT_ROWS
-    bne LA380
+    bne CALC_BLIT_PTRS
     rts
 
-LA380:
+; Convert BLIT_ROW/BLIT_COL into two real memory pointers: SCREEN_PTR (the
+; $7800 buffer cell to write) and COLOR_PTR (the matching $D800 colour-RAM
+; cell) - a chain of carried 8-bit adds building up what's really a bigger
+; address calculation than the 6502 can do in one step. The precise carry
+; bookkeeping (PHP/PLP pairs stashing intermediate carries) isn't unpacked
+; further here; the net effect is "screen row address (from ROWADDR_LO/HI,
+; the table built in BUILD_ROWADDR_LOOP) + column, offset into the
+; currently-active scroll buffer (SCROLL_DST)". (???: exact per-step carry
+; semantics not re-derived.)
+CALC_BLIT_PTRS:
     lda BLIT_ROW
     asl a
     tay
@@ -3853,17 +4006,17 @@ LA380:
     lda ROWADDR_LO,y
     sbc #$28
     php
-    bcs LA39A
+    bcs BLIT_COLOR_HI_OK
     dec COLOR_PTR_HI
 
-LA39A:
+BLIT_COLOR_HI_OK:
     clc
     adc BLIT_COL
     php
-    bcc LA3A2
+    bcc BLIT_COLOR_LO_OK
     inc COLOR_PTR_HI
 
-LA3A2:
+BLIT_COLOR_LO_OK:
     sta COLOR_PTR
     clc
     adc #$24
@@ -3884,36 +4037,42 @@ LA3A2:
     sta BLIT_ROW
     ldx BLIT_COL
 
-LA3C3:
+; Main copy loop: for BLIT_ROWS rows of BLIT_WIDTH tiles each, copy from
+; STREAM_PTR into SCREEN_PTR (and, if OBJ_COLOR is nonzero, stamp OBJ_COLOR
+; into COLOR_PTR too). While copying, also record which screen ROW each
+; destination column landed on into ZVEC_MOVE,x - a small per-column
+; "what row is object data at this column" lookup, presumably consulted
+; elsewhere (collision detection against blitted objects?). (???)
+BLIT_ROW_LOOP:
     ldy BLIT_WIDTH
     dey
 
-LA3C6:
+BLIT_COL_LOOP:
     lda (STREAM_PTR),y
     sta (SCREEN_PTR),y
     lda OBJ_COLOR
-    beq LA3D8
+    beq BLIT_COL_NEXT
     sta (COLOR_PTR),y
     cpx #$00
-    beq LA3D8
+    beq BLIT_COL_NEXT
     lda BLIT_ROW
     sta ZVEC_MOVE,x
 
-LA3D8:
+BLIT_COL_NEXT:
     inx
     dey
-    bpl LA3C6
+    bpl BLIT_COL_LOOP
     dec BLIT_ROWS
-    beq LA403
+    beq BLIT_ROWS_DONE
     ldx #$00
     lda SCREEN_PTR
     clc
-    adc #$28
-    bcc LA3ED
+    adc #$28            ; advance to the next screen row (40 cols/row)
+    bcc BLIT_NEXT_ROW_LO
     inc SCREEN_PTR_HI
     inc COLOR_PTR_HI
 
-LA3ED:
+BLIT_NEXT_ROW_LO:
     sta SCREEN_PTR
     lda COLOR_PTR
     clc
@@ -3921,22 +4080,30 @@ LA3ED:
     sta COLOR_PTR
     lda STREAM_PTR
     clc
-    adc BLIT_WIDTH
-    bcc LA3FF
+    adc BLIT_WIDTH      ; advance the source past this row's tiles
+    bcc BLIT_STREAM_LO_OK
     inc STREAM_PTR_HI
 
-LA3FF:
+BLIT_STREAM_LO_OK:
     sta STREAM_PTR
-    bne LA3C3
+    bne BLIT_ROW_LOOP
 
-LA403:
+; All rows copied: if BLIT_FLAGS has its top bit set (the smoke-plume
+; expansion flag), fall into the widening pass below; otherwise done.
+BLIT_ROWS_DONE:
     lda BLIT_FLAGS
-    bmi LA408
+    bmi WIDEN_PLUME_ENTRY
 
-LA407:
+DRAW_OBJECT_TILES_DONE:
     rts
 
-LA408:
+; Smoke-plume expansion: for BLIT_FLAGS-many more rows, widen the shape by 2
+; tiles each row (BLIT_COL/BLIT_WIDTH shrink/grow accordingly) while reading
+; from TWO alternating small source offsets (STREAM_PTR / STREAM_PTR2) -
+; this is what turns a small fixed source shape into the triangular,
+; growing smoke-plume trail documented in claude/Smoke_Weapon_Notes.md
+; ("3 -> 5 -> 7 -> 9 tiles wide over successive rows").
+WIDEN_PLUME_ENTRY:
     and #$07
     sta BLIT_FLAGS
     sta BLIT_ROWS
@@ -3950,52 +4117,55 @@ LA408:
     lda #$02
     sta BLIT_WIDTH
 
-LA41F:
+WIDEN_ROW_LOOP:
     dec BLIT_ROWS
-    beq LA407
+    beq DRAW_OBJECT_TILES_DONE
     clc
     lda SCREEN_PTR
     adc #$27
     sta SCREEN_PTR
-    bcc LA42E
+    bcc WIDEN_COLOR_ADD
     inc SCREEN_PTR_HI
 
-LA42E:
+WIDEN_COLOR_ADD:
     clc
     lda COLOR_PTR
     adc #$27
     sta COLOR_PTR
-    bcc LA439
+    bcc WIDEN_ROW_STEP
     inc COLOR_PTR_HI
 
-LA439:
+WIDEN_ROW_STEP:
     dec BLIT_ROW
     lda BLIT_ROW
     cmp #$02
-    bcs LA447
+    bcs WIDEN_ROW_EXPAND
 
-LA441:
+WIDEN_ROW_STOP:
     lda #$00
     sta BLIT_ROWS
-    beq LA407
+    beq DRAW_OBJECT_TILES_DONE
 
-LA447:
+; Grow the shape by 2 (one tile each side) and blit the two new edge tiles
+; (from STREAM_PTR/STREAM_PTR2, the "left edge" and "right edge" sources)
+; plus refresh the middle columns' ZVEC_MOVE row-tracking.
+WIDEN_ROW_EXPAND:
     dec BLIT_COL
     inc BLIT_WIDTH
     inc BLIT_WIDTH
     ldx #$00
     ldy #$00
-    beq LA457
+    beq WIDEN_EDGE_BLIT
 
-LA453:
+WIDEN_EDGE_RIGHT:
     ldx #$02
     ldy BLIT_WIDTH
 
-LA457:
+WIDEN_EDGE_BLIT:
     lda (STREAM_PTR,x)
     sta (SCREEN_PTR),y
     lda OBJ_COLOR
-    beq LA472
+    beq WIDEN_EDGE_NEXT
     sta (COLOR_PTR),y
     tya
     clc
@@ -4004,117 +4174,139 @@ LA457:
     lda BLIT_ROW
     sta ZVEC_MOVE,x
     cpx #$23
-    bcs LA441
+    bcs WIDEN_ROW_STOP
     cpx #$05
-    bcc LA441
+    bcc WIDEN_ROW_STOP
 
-LA472:
+WIDEN_EDGE_NEXT:
     dey
-    bpl LA41F
-    bmi LA453
+    bpl WIDEN_ROW_LOOP
+    bmi WIDEN_EDGE_RIGHT
 
 ; -----------------------------------------------------------------------
 ; Per-frame weapon / special-vehicle update (weapons van, smoke/missile fx).
 ; Smoke: decrements the $F7 charge and blits the plume tiles ($AD/$10/$AE, edge
 ; variants $B0-$B6) from ROM ~$A538-$A567 (STREAM_PTR) into the $7800 road buffer
 ; via DRAW_OBJECT_TILES, colour $09; blit col/row from STATE_4DB9 / STATE_4DC1.
+; Fully traced structure: skip entirely while a blit is still in progress
+; (BLIT_ROWS nonzero, i.e. DRAW_OBJECT_TILES hasn't finished last frame's
+; shape yet); otherwise either toggle the requested weapon (STATE_4D0C=0
+; path) or fire whichever of smoke/missile is currently selected and has
+; ammo (STATE_4D0C nonzero path).
 UPDATE_WEAPONS:
     lda BLIT_ROWS
-    bne LA493
+    bne WEAPONS_DONE
     lda STATE_4D0C
-    bne LA494
+    bne WEAPON_FIRE_ENTRY
     sta BLIT_FLAGS
     lda WEAPON_STATE
     and #$10
-    beq LA493
+    beq WEAPONS_DONE
     lda WEAPON_STATE
     and #$0F
-    eor #$03
-    sta WEAPON_STATE
+    eor #$03            ; toggle between weapon slots (exact encoding of
+    sta WEAPON_STATE     ;   WEAPON_STATE's low nibble not independently
+                        ;   re-derived here)
 
-LA493:
+WEAPONS_DONE:
     rts
 
-LA494:
+; Decide which weapon to actually fire: WEAPON_STATE==$11 or out-of-missiles
+; -> smoke; WEAPON_STATE>$11 or out-of-smoke -> missile. If both are
+; available, flip WEAPON_STATE's request bit and re-check (so this can
+; alternate between the two if both are requested).
+WEAPON_FIRE_ENTRY:
     lda WEAPON_STATE
 
-LA497:
+WEAPON_FIRE_CHECK:
     cmp #$11
-    beq LA4AF
-    bcs LA4C4
+    beq FIRE_SMOKE
+    bcs FIRE_MISSILE
     lda MISSILE_CNT
-    beq LA4AF
+    beq FIRE_SMOKE
     lda SMOKE_CNT
-    beq LA4C4
+    beq FIRE_MISSILE
     lda WEAPON_STATE
     ora #$10
     sta WEAPON_STATE
-    bne LA497
+    bne WEAPON_FIRE_CHECK   ; (unconditional - ORA of a nonzero bit is nonzero)
 
-LA4AF:
+FIRE_SMOKE:
     lda SMOKE_CNT
-    beq LA493
+    beq WEAPONS_DONE     ; out of smoke -> nothing to fire
     ldy #$12
-    jsr SOUND_REQ_V0
+    jsr SOUND_REQ_V0     ; play the smoke sound effect
     dec SMOKE_CNT
     lda #$08
-    sta BLIT_FLAGS
+    sta BLIT_FLAGS       ; 8 more widening rows (the smoke-plume expansion,
+                        ;   see WIDEN_PLUME_ENTRY in DRAW_OBJECT_TILES)
     ldx #$FD
     ldy #$00
-    beq LA4E3
+    beq WEAPON_FX_COMMON    ; (unconditional)
 
-LA4C4:
+FIRE_MISSILE:
     lda MISSILE_CNT
-    beq LA493
+    beq WEAPONS_DONE     ; out of missiles -> nothing to fire
     ldy #$14
-    jsr SOUND_REQ_V0
+    jsr SOUND_REQ_V0     ; play the missile sound effect
     dec MISSILE_CNT
-    inc BLIT_FLAGS
+    inc BLIT_FLAGS       ; cycle an animation-frame counter 1-4...
     lda BLIT_FLAGS
     cmp #$05
-    bcc LA4D9
+    bcc MISSILE_FRAME_OK
     lda #$04
 
-LA4D9:
-    ora #$80
-    sta BLIT_FLAGS
+MISSILE_FRAME_OK:
+    ora #$80            ; ...with the widen flag set too (missiles get a
+    sta BLIT_FLAGS        ;   small trail effect, same mechanism as smoke)
     lda #$09
     ldx #$15
     ldy #$08
 
-LA4E3:
+; Shared tail for both weapons: search up to 8 entries in the SPR_MATCH_A/
+; B/C tables for one matching the current OBJ_TBL69/71/79 values (candidate:
+; identifying which weapons-icon graphic is currently on-screen, to decide
+; whether to override the blit colour below) - the precise role of
+; OBJ_TBL69/71/79 here isn't confirmed. (???)
+WEAPON_FX_COMMON:
     sta OBJ_COLOR
     stx ZTMP_08
     ldx #$08
 
-LA4E9:
+FIND_MATCH_LOOP:
     clc
     lda ZTMP_08
-    adc #$03
-    sta ZTMP_08
+    adc #$03            ; ZTMP_08 walks forward 3 bytes per try - becomes
+    sta ZTMP_08           ;   the eventual STREAM_PTR offset below
     lda SPR_MATCH_A,y
     cmp OBJ_TBL69
-    bne LA508
+    bne FIND_MATCH_NEXT
     lda SPR_MATCH_B,y
     cmp OBJ_TBL79
-    bne LA508
+    bne FIND_MATCH_NEXT
     lda SPR_MATCH_C,y
     cmp OBJ_TBL71
-    beq LA50D
+    beq MATCH_FOUND
 
-LA508:
+FIND_MATCH_NEXT:
     iny
     dex
-    bne LA4E9
-    rts
+    bne FIND_MATCH_LOOP
+    rts                 ; no match in 8 tries -> give up, nothing blitted
 
-LA50D:
+; A match was found "early" (X still >=4, i.e. within the first few tries)
+; keeps the colour set above; a "late" match (X<4) overrides to light blue.
+MATCH_FOUND:
     cpx #$04
-    bcs LA515
+    bcs SET_BLIT_SOURCE
     lda #$0E
     sta OBJ_COLOR
 
-LA515:
+; Point STREAM_PTR at the matched tile-triple in ROM ($A538 + the offset
+; accumulated in ZTMP_08 - confirms the header's "$A538-$A567" smoke/effect
+; source range), then set up a single blit row at the object's current
+; position (STATE_4DB9/STATE_4DC1) for DRAW_OBJECT_TILES to pick up.
+SET_BLIT_SOURCE:
     clc
     lda #$38
     adc ZTMP_08
@@ -4149,70 +4341,98 @@ LA515:
 
 ; -----------------------------------------------------------------------
 ; Advance and draw the road weapon/hazard effects using the FX_* state.
+; Two independent trigger mechanisms feed into the same blit tail
+; (COMMON_FX_BLIT below): the traced RNG-gated random spawn on
+; ROAD_FEATURE==$14 (see claude/Boat_River_Notes.md - the repeating water-
+; loop's random enemy-boat spawn) and a second, segment-id-gated path
+; (SEGMENT_FX_TRIGGER) for segments $1D/$1E specifically (the level's
+; closing segments, per claude/Road_Map_Decode.md's decoded graph) that
+; pulls its parameters from the FX_PARAM_E9-EC tables instead of rolling
+; randomly.
 UPDATE_HAZARDS:
     jsr DRAW_OBJECT_TILES
     ldx #$05
+
+; Four independent effect timers (FX_TIMER0-3) count down in parallel; the
+; FIRST one still running (checked 3,2,1,0) is decremented and its expiry
+; jumps to SEGMENT_FX_TRIGGER below - i.e. only one timer's countdown
+; matters per frame, checked in priority order. These are the same
+; FX_TIMER1/2/3 armed conditionally in UPDATE_SCENE_SELECT near segments
+; $0F/$1B (Stage 6, earlier) - this is where those armed timers actually
+; DO something once they expire, supporting the "road-sign/effect arming"
+; hypothesis noted there.
     lda FX_TIMER3
-    bne LA609
+    bne DEC_TIMER3
     dex
     lda FX_TIMER2
-    bne LA606
+    bne DEC_TIMER2
     dex
     lda FX_TIMER1
-    bne LA603
+    bne DEC_TIMER1
     dex
     lda FX_TIMER0
-    beq LA60E
+    beq SPAWN_CHECK_ENTRY
     dec FX_TIMER0
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
-LA603:
+DEC_TIMER1:
     dec FX_TIMER1
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
-LA606:
+DEC_TIMER2:
     dec FX_TIMER2
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
-LA609:
+DEC_TIMER3:
     dec FX_TIMER3
-    jmp LA785
+    jmp SEGMENT_FX_FIRE  ; a timer is still running - re-load this effect's
+                        ;   params (from FX_PARAM_E9-EB,x) and redraw it
+                        ;   every frame while its timer counts down
 
-LA60E:
+; No timer needs decrementing this frame: if an effect is still mid-blit
+; (FX_COUNT nonzero), just continue it. Otherwise check the two trigger
+; conditions: ROAD_FEATURE==$14 (random spawn, RANDOM_SPAWN_ROLL below), or
+; being on segment $1D/$1E (SEGMENT_FX_TRIGGER, further down past the data
+; tables).
+SPAWN_CHECK_ENTRY:
     lda FX_COUNT
-    bne LA659
+    bne COMMON_FX_BLIT
     lda ROAD_FEATURE
     cmp #$14
-    beq LA62D
+    beq RANDOM_SPAWN_ROLL
     lda SEG_REPEAT
     dex
     ldy ROAD_SEG_IDX
     cpy #$1D
-    bne LA624
-    jmp LA77C
+    bne CHECK_SEG_1E
+    jmp SEGMENT_FX_TRIGGER
 
-LA624:
+CHECK_SEG_1E:
     dex
     cpy #$1E
-    bne LA62C
-    jmp LA781
+    bne SPAWN_CHECK_DONE
+    jmp SEGMENT_FX_TRIGGER_B
 
-LA62C:
+SPAWN_CHECK_DONE:
     rts
 
-LA62D:
+; The traced random-spawn roll from claude/Boat_River_Notes.md: ~2.3% chance
+; (RNG_NEXT >= $FA) to arm a spawn; if it fires, a second roll picks between
+; two small tile-blit shapes ($A5BB or $A598) with a randomised width
+; (FX_LEN).
+RANDOM_SPAWN_ROLL:
     jsr RNG_NEXT
     cmp #$FA
-    bcc LA62C
+    bcc SPAWN_CHECK_DONE   ; ~97.7% of the time: nothing
     jsr RNG_NEXT
     pha
     cmp #$7F
     lda #$09
     ldx #$A5
     ldy #$BB
-    bcc LA648
+    bcc RANDOM_SPAWN_SET
     lda #$07
     ldx #$A5
     ldy #$98
 
-LA648:
+RANDOM_SPAWN_SET:
     sta FX_COUNT
     stx FX_SRC_HI
     sty FX_SRC
@@ -4223,7 +4443,10 @@ LA648:
     lda #$05
     sta ZTMP_30
 
-LA659:
+; Shared blit tail for BOTH trigger paths (random spawn and the segment-$1D/
+; $1E path below, which jumps here too): position and draw one row via
+; DRAW_OBJECT_TILES from whatever FX_SRC/FX_LEN/ZTMP_30 currently hold.
+COMMON_FX_BLIT:
     dec FX_COUNT
     lda FX_LEN
     sta BLIT_COL
@@ -4242,10 +4465,10 @@ LA659:
     lda FX_SRC
     clc
     adc ZTMP_30
-    bcc LA680
+    bcc FX_SRC_HI_OK
     inc FX_SRC_HI
 
-LA680:
+FX_SRC_HI_OK:
     sta FX_SRC
     jsr DRAW_OBJECT_TILES
     rts
@@ -4290,18 +4513,25 @@ ONROAD_MSG_TBL:
     .byte $A6,$A7,$A7,$A7,$12,$20,$08,$0E,$0A,$0A,$01,$03,$02,$04,$03,$03
     .byte $0B,$04,$10,$0D,$07,$17
 
-LA77C:
+; Gate check for segment $1D: only fires when SEG_REPEAT (still in A from
+; the jump-in site above) is exactly $0D - a specific row within the
+; segment, not the whole segment.
+SEGMENT_FX_TRIGGER:
     cmp #$0D
-    beq LA785
+    beq SEGMENT_FX_FIRE
 
-LA780:
+SEGMENT_FX_SKIP:
     rts
 
-LA781:
+; Gate check for segment $1E: fires only when SEG_REPEAT == $0F.
+SEGMENT_FX_TRIGGER_B:
     cmp #$0F
-    bne LA780
+    bne SEGMENT_FX_SKIP
 
-LA785:
+; Load this effect's parameters from the FX_PARAM_E9/EA/30/EC/EB tables
+; (indexed by X - which of the 4 FX_TIMERs expired, from UPDATE_HAZARDS
+; above) and draw via the same COMMON_FX_BLIT tail the random-spawn path uses.
+SEGMENT_FX_FIRE:
     lda FX_PARAM_E9,x
     sta FX_SRC
     lda FX_PARAM_EA,x
@@ -4312,7 +4542,7 @@ LA785:
     sta FX_LEN
     lda FX_PARAM_EB,x
     sta FX_COUNT
-    jmp LA659
+    jmp COMMON_FX_BLIT
 ; -----------------------------------------------------------------------
 ; Effect spawn/param helper code plus FX parameter tables, as data.
     .byte $10,$10,$B7,$10,$B9,$BB,$10,$BD,$10,$10,$10,$10,$10,$B8,$BC,$BA

@@ -12,7 +12,7 @@ Both snapshots land in **segment `$11`** (`ROAD_PTR=$AD3D`, 3 rows) with `ROAD_F
 `PREV_FEATURE=$13` (the already-documented river-entrance transition feature). Reading segment
 `$11`'s raw row bytes straight from the assembled ROM (`ROAD_PTR_LO/HI_TBL` + `ROAD_LEN_TBL` at
 segment index `$11`) gives `02 03 02`. The per-row reader walks this **backwards**
-(`ldy ROAD_SEG_LEN : dey : lda (ROAD_PTR),y`, `disassembly/spyhunter.asm:1250-1255`), so the
+(`ldy ROAD_SEG_LEN : dey : lda (ROAD_PTR),y`, `READ_ROAD_ROW`, `disassembly/spyhunter.asm`), so the
 actual play order is **`$02` (boat) -> `$03` -> `$02` (boat)** — the boat state opens and closes
 the segment, with one row of a different feature (`$03`) in between (likely a wake/current
 variant of the water tile, not yet visually confirmed).
@@ -25,7 +25,8 @@ snapshots' `PREV_FEATURE=$13`.
 ## Graphics-table evidence
 
 `ROAD_FEATURE` indexes `OBJ_ADDR_LO/HI` (`$AD63`/`$AD7D`) + `OBJ_ROWREP_TBL`/`OBJ_SEGREP_TBL`
-(`$AD97`/`$ADB1`) directly (`tay` right after the feature is loaded — `disassembly/spyhunter.asm:1255-1267`).
+(`$AD97`/`$ADB1`) directly (`tay` right after the feature is loaded — `READ_ROAD_ROW`,
+`disassembly/spyhunter.asm`).
 Reading those tables from the assembled ROM at index `$02`:
 
 ```
@@ -63,25 +64,25 @@ ROM row stream is `$0E -> $14` (2 rows, `ROAD_PTR=$AD40`); segment `$13`'s is `$
 road loop** between scripted events, and `$14` appears in both, i.e. every lap of the loop passes
 through a `$14` row.
 
-`ROAD_FEATURE=$14` is directly checked in the disassembly at `LA60E`
-(`disassembly/spyhunter.asm:3619-3663`):
+`ROAD_FEATURE=$14` is directly checked in the disassembly at `SPAWN_CHECK_ENTRY`/
+`RANDOM_SPAWN_ROLL` (`UPDATE_HAZARDS`, `disassembly/spyhunter.asm`):
 
 ```
 lda ROAD_FEATURE
 cmp #$14
-beq LA62D          ; -> random spawn roll
+beq RANDOM_SPAWN_ROLL   ; -> random spawn roll
 ...
-LA62D:
+RANDOM_SPAWN_ROLL:
     jsr RNG_NEXT
     cmp #$FA
-    bcc LA62C       ; ~97.7% of the time: nothing (RNG_NEXT < $FA -> rts)
-    jsr RNG_NEXT     ; ~2.3% chance: pick a spawn table + params
+    bcc SPAWN_CHECK_DONE  ; ~97.7% of the time: nothing (RNG_NEXT < $FA -> rts)
+    jsr RNG_NEXT           ; ~2.3% chance: pick a spawn table + params
     pha
     cmp #$7F
     lda #$09 : ldx #$A5 : ldy #$BB
-    bcc LA648
+    bcc RANDOM_SPAWN_SET
     lda #$07 : ldx #$A5 : ldy #$98
-LA648:
+RANDOM_SPAWN_SET:
     sta FX_COUNT : stx FX_SRC_HI : sty FX_SRC   ; FX_SRC/HI -> $A5BB or $A598
     ...                                          ; FX_LEN from further RNG
 ```
@@ -106,24 +107,24 @@ member of the `$11/$13/$14/$15` "scripted trigger" family. Segment `$13`'s ROM r
 `$14`, i.e. the last row before the loop exits back onto normal road via segment `$13`'s branch
 (`main=$12` continues the loop, `branch=$14` exits it).
 
-`$15` is checked in the same raster-IRQ code block as `$13` (`disassembly/spyhunter.asm:1099-1132`,
-part of `IRQ_MAIN`'s bottom-half handler, right after the per-frame sprite-multiplex decrement
-loop at `L8474`):
+`$15` is checked in the same raster-IRQ code block as `$13` (`CONSUME_ARMED_ROW`/`STORE_ARMED_ROW`/
+`PAINT_AND_ARM_MUX`, `disassembly/spyhunter.asm`), part of `IRQ_MAIN`'s bottom-half handler, right
+after the per-frame sprite-multiplex decrement loop at `SPRITE_MUX_ROW_LOOP`):
 
 ```
 lda ROW_REPEAT
 ldy #$14
 cmp #$01                ; only on the LAST row of the current row-repeat cycle
-bne L849E
+bne CONSUME_ARMED_ROW
 lda ROAD_FEATURE
 cmp #$15
-beq L84AA               ; feature $15 -> Y stays $14
+beq STORE_ARMED_ROW     ; feature $15 -> Y stays $14
 cmp #$13
-bne L84C9
+bne IRQ_MAIN_TAIL
 ldy #$04                ; feature $13 -> Y becomes $04
-L84AA:
+STORE_ARMED_ROW:
     sty STATE_4D18       ; remember which row-band was (re)armed
-L84AD:
+PAINT_AND_ARM_MUX:
     lda #$0A
     sta COLOR_RAM+HISCORE_HI,y   ; paint a 4-cell colour block: COLOR_RAM+Y+4..+7
     sta COLOR_RAM+BIT_MASK,y
@@ -140,10 +141,11 @@ So `$13` (entering the water) and `$15` (exiting it) are a matched pair that **r
 sprite multiplexer** — reload all four `SPRMUX_CNT*` countdown arrays for 25 rows starting at a
 computed row (`Y=$04` on entry, `Y=$14` on exit) and paint a matching 4-cell colour-RAM block —
 each at the last row of their respective feature's row-repeat cycle. `STATE_4D18` carries the
-armed row index forward so the `L849E` path (taken every other frame, when `ROAD_FEATURE` isn't
-`$13`/`$15` or `ROW_REPEAT>1`) can consume/clear it via the same paint-and-arm code at `L84AD`.
-This is most likely what schedules the extra multiplexed hazard/enemy-boat sprites specifically
-at the river's entry and exit bands, rather than a purely visual flash.
+armed row index forward so the `CONSUME_ARMED_ROW` path (taken every other frame, when
+`ROAD_FEATURE` isn't `$13`/`$15` or `ROW_REPEAT>1`) can consume/clear it via the same paint-and-arm
+code at `PAINT_AND_ARM_MUX`. This is most likely what schedules the extra multiplexed hazard/
+enemy-boat sprites specifically at the river's entry and exit bands, rather than a purely visual
+flash.
 
 ## Open item: does crashing into water cost a life?
 
@@ -168,11 +170,13 @@ sequence. Can't conclude a life was lost from these two alone. Needs a same-sess
 6. `OBJ_TBL63/6B/73` (all three set to `$02` together) is a shared boat/terrain-mode flag for NPC
    object slots, confirmed across all three water snapshots.
 7. `ROAD_FEATURE $14` (in the repeating `$12`/`$13` water loop) is a ~2.3%-per-pass random spawn
-   trigger, traced directly in ROM at `LA60E`/`LA62D` — picks one of two small tile-blit shapes
+   trigger, traced directly in ROM at `SPAWN_CHECK_ENTRY`/`RANDOM_SPAWN_ROLL` (`UPDATE_HAZARDS`) —
+   picks one of two small tile-blit shapes
    (`$A598`/`$A5BB`) via `DRAW_OBJECT_TILES`'s blit parameters. This explains the randomly
    encountered enemy boat in `water-enemyboat-score14505.vsf`.
 8. `ROAD_FEATURE $15` = the water-exit trigger, matched with `$13`'s water-entry trigger — both
-   traced in `IRQ_MAIN`'s bottom-half handler (`disassembly/spyhunter.asm:1099-1132`) re-arming
+   traced in `IRQ_MAIN`'s bottom-half handler (`CONSUME_ARMED_ROW`/`STORE_ARMED_ROW`/
+   `PAINT_AND_ARM_MUX`, `disassembly/spyhunter.asm`) re-arming
    all four `SPRMUX_CNT*` sprite-multiplex counters for 25 rows at a computed row band (`$04` on
    entry, `$14` on exit) plus a matching 4-cell colour-RAM block, confirmed by
    `spyhunter-exit-water.vsf` (seg `$13`, feature `$15`, prev `$14`). This closes out the last of

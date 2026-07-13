@@ -33,7 +33,8 @@ size argument, not a visual confirmation.
 `HERO_STATE` (`OBJ_TYPE[1]`, `$A3`) = **`$02`**, `OBJ_ANIM[1]` (`$9B`) = **`$08`** — both values
 not seen in any prior snapshot (previously: `$FF` normal, `$03` van, `$00`/`$11` on the bridge).
 Checking `OBJINIT_PARAM_TBL` (`$8B3F`, indexed by `TYPE*4`, feeds the per-object move/draw
-dispatch vectors `ZVEC_MOVE`/`ZVEC_DRAW` copied at `disassembly/spyhunter.asm:1976-1982`) directly
+dispatch vectors `ZVEC_MOVE`/`ZVEC_DRAW` copied at `COPY_TYPE_VECTORS`, `disassembly/spyhunter.asm`
+in `PROCESS_OBJECTS`) directly
 from the ROM:
 
 ```
@@ -46,8 +47,8 @@ type $03: move=$9A8E draw=$90AA
 So `HERO_STATE=$02` dispatches through the **same generic move/draw handler** as `$00`, `$01`
 and `$03` (the van) — meaning these low hero-state values are likely a small state machine (idle
 / transitioning / in van / ...) whose actual differing behaviour comes from checks elsewhere
-against `HERO_STATE` directly (as seen in `UPDATE_SCENE_SELECT`,
-`disassembly/spyhunter.asm:2361-2374`), not from separate per-state move code. `$02` is a
+against `HERO_STATE` directly (as seen in `UPDATE_SCENE_SELECT`, `disassembly/spyhunter.asm`),
+not from separate per-state move code. `$02` is a
 plausible "boat-to-car transition at the dock" cutscene state, consistent with the user's
 description, but not confirmed beyond this correlation.
 

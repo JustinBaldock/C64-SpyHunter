@@ -7,7 +7,7 @@ feature `$0F`, prev `$02`). Extracted with `tools/vsf_extract.py`.
 
 The snapshot lands in **segment `$0B`** (`ROAD_PTR=$AD2C`, 3 rows). Reading the raw row bytes
 from the ROM (segment `$0B`'s feature stream) gives `06 05 0F`; played in the tool's documented
-reverse order (`disassembly/spyhunter.asm:1250-1255`), the actual sequence is
+reverse order (`READ_ROAD_ROW`, `disassembly/spyhunter.asm`), the actual sequence is
 **`$0F` (broken-bridge/return) -> `$05` -> `$06`** (both plain-road features, `rowrep=$1C=28` each
 — long, ordinary road blocks).
 
@@ -39,7 +39,7 @@ address range runs `$2980` (`$00`) up to `$4A40+`(`$0F`)'s block, ending right a
 from `$10` up lands outside this table's clean address progression (see
 `claude/Road_Map_Decode.md` for the full table dump) and behaves differently — several of those
 higher codes (`$11`, `$13`, `$14`, `$15`) are separately checked by explicit `CMP #imm` branches
-in `UPDATE_SCENE_SELECT` (`disassembly/spyhunter.asm:2361-2374`) and elsewhere, i.e. they double
+in `UPDATE_SCENE_SELECT` (`disassembly/spyhunter.asm`) and elsewhere, i.e. they double
 as scene-transition triggers, not just tile-graphics indices.
 
 ## New information (list)

@@ -118,7 +118,7 @@ correct.
 
 `ROAD_FEATURE` (`$44`) indexes `OBJ_ADDR_LO/HI` (`$AD63`/`$AD7D`) and `OBJ_ROWREP_TBL`/
 `OBJ_SEGREP_TBL` (`$AD97`/`$ADB1`) directly (`tay` right after the feature byte is loaded,
-`disassembly/spyhunter.asm:1250-1267`) to pick the row's `SCROLL_SRC` graphics pointer. Reading
+`READ_ROAD_ROW`, `disassembly/spyhunter.asm`) to pick the row's `SCROLL_SRC` graphics pointer. Reading
 those tables straight from the assembled ROM gives a clean **16-entry table for codes `$00-$0F`**
 — pointers into a `$2980-$4CFF` RAM graphics bank, ending exactly at the documented `$4D00`
 game-state-variable boundary:
@@ -138,9 +138,9 @@ separately checked by explicit `CMP #imm` branches elsewhere — all four confir
 
 | feature | checked at | effect |
 |---|---|---|
-| `$11` | `UPDATE_SCENE_SELECT`, `disassembly/spyhunter.asm:2361-2374` | scene/difficulty select |
-| `$13` | `IRQ_MAIN` bottom-half, `disassembly/spyhunter.asm:1099-1132` | **water-entry**: on the last row of its row-repeat cycle, re-arms all four `SPRMUX_CNT*` sprite-multiplex counters for 25 rows starting at row `$04`, plus a matching 4-cell colour-RAM block; river-entrance transition (`spyhunter.asm` header) |
-| `$14` | effects code at `LA60E`/`LA62D`, `disassembly/spyhunter.asm:3619-3663` | **random object spawn**: ~2.3% chance per pass through the repeating water loop (segments `$12`/`$13`) to blit one of two small tile shapes (`$A598`/`$A5BB`) via the shared `DRAW_OBJECT_TILES` blit parameters — confirmed by `water-enemyboat-score14505.vsf`; see `claude/Boat_River_Notes.md` |
+| `$11` | `UPDATE_SCENE_SELECT`, `disassembly/spyhunter.asm` | scene/difficulty select |
+| `$13` | `IRQ_MAIN` bottom-half (`CONSUME_ARMED_ROW`/`STORE_ARMED_ROW`/`PAINT_AND_ARM_MUX`), `disassembly/spyhunter.asm` | **water-entry**: on the last row of its row-repeat cycle, re-arms all four `SPRMUX_CNT*` sprite-multiplex counters for 25 rows starting at row `$04`, plus a matching 4-cell colour-RAM block; river-entrance transition (`spyhunter.asm` header) |
+| `$14` | `SPAWN_CHECK_ENTRY`/`RANDOM_SPAWN_ROLL` (`UPDATE_HAZARDS`), `disassembly/spyhunter.asm` | **random object spawn**: ~2.3% chance per pass through the repeating water loop (segments `$12`/`$13`) to blit one of two small tile shapes (`$A598`/`$A5BB`) via the shared `DRAW_OBJECT_TILES` blit parameters — confirmed by `water-enemyboat-score14505.vsf`; see `claude/Boat_River_Notes.md` |
 | `$15` | same `IRQ_MAIN` code as `$13` | **water-exit**: mirrors `$13`, re-arms the same sprite-mux counters for 25 rows starting at row `$14` instead — confirmed by `exit-water.vsf`; see `claude/Boat_River_Notes.md` |
 
 All four `$11/$13/$14/$15` "scripted trigger" feature codes are now traced. `$10` itself (seen
@@ -150,7 +150,7 @@ river/boat/bridge arc begins) isn't directly `CMP`'d anywhere found so far — s
 ## Full segment row-by-row table (ROM bytes, code's actual reverse play order)
 
 Extracted directly from the assembled ROM (`ROAD_PTR_LO/HI_TBL` + `ROAD_LEN_TBL`, walked the same
-`dey`-first order the game itself uses — `disassembly/spyhunter.asm:1250-1255`). This resolves the
+`dey`-first order the game itself uses — `READ_ROAD_ROW`, `disassembly/spyhunter.asm`). This resolves the
 "decode the per-segment feature-list bytes" open item in full, not just the snapshotted segments:
 
 ```

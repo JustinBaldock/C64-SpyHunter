@@ -51,12 +51,53 @@ sta WEAPON_FIRE_INPUT   ; ($4D0C) - checked by UPDATE_WEAPONS to fire
 ```
 
 `UPDATE_WEAPONS` (Stage 6) checks `WEAPON_FIRE_INPUT` (formerly the unnamed
-`STATE_4D0C`) to decide whether to fire the currently-selected weapon
-(smoke or missile). **Confirmed: this is a single-player game that reads a
-second joystick port purely for its fire button, to trigger weapons -
-independent of joystick 1's own fire button, which is decoded separately
-into `JOY1_FIRE_BTN` and doesn't appear to be read anywhere else in the
-annotated code yet.**
+`STATE_4D0C`) to decide whether to fire the currently-selected SPECIAL
+weapon (smoke or missile, limited ammo). **Confirmed: this is a
+single-player game that reads a second joystick port purely for its fire
+button, to trigger the special weapon - independent of joystick 1's own
+fire button, which is decoded separately into `JOY1_FIRE_BTN`.**
+
+Cross-checked against the newly-added `references/Commodore_64_memory_map.rtf`:
+it documents exactly this hardware layout - `$DC00` (`CIA1_PRA`) bit 4 = port 2
+fire, `$DC01` (`CIA1_PRB`) bit 4 = port 1 fire - matching `READ_DUAL_JOYSTICK_INPUT`
+byte-for-byte (`CIA1_PRA`/`CIA1_PRB` equate comments updated with the full
+bit layout accordingly).
+
+## The joystick-1-fire / machine-gun finding (follow-up)
+
+`JOY1_FIRE_BTN` (`$4D0B`) - joystick 1's OWN fire button, on the same port as
+steering - turned out **not** to be dead: it's read at `$8CE0`
+(`LDA $4D0B`), inside the large still-undissected hero/object move-handler
+block right after `OBJINIT_PARAM_TBL` (Stage 5, the ~1650-byte block flagged
+"left for a future session"). Traced (not yet converted to labelled
+instructions - see that block's header comment):
+
+```
+lda JOY1_FIRE_BTN
+beq +skip                  ; not pressed -> skip
+lda SEQ_STATE
+cmp #$02 : bcc +skip       ; only while SEQ_STATE is in [2,4]
+cmp #$05 : bcs +skip
+lda HERO_STATE
+cmp #$07 : bne +other      ; only in HERO_STATE $07
+lda GUN_HEAT
+beq +other                 ; no heat left -> can't fire
+... (a couple of position/proximity checks against $C6/$C7, unnamed -
+     possibly a dedicated "bullet" object slot's clamped sprite-delta) ...
+dec GUN_HEAT                ; consumes one "shot" of heat
+```
+
+This is almost certainly the **machine-gun fire trigger**. `GUN_HEAT`
+(`$F6`, previously "weapon/ammo counter (???)") is renamed/re-commented as a
+heat/cooldown gauge rather than literal ammo - consistent with the machine
+gun being the always-available primary weapon, and with `MOVE_BOAT_CRASH`
+resetting it to 0 alongside `MISSILE_CNT`/`SMOKE_CNT` on a water-hazard
+crash (a crash disarms all three weapon systems, not just the special one).
+
+So the full picture: **joystick 1 steers and fires the machine gun;
+joystick 2's fire button (and only its fire button) fires the special
+weapon.** `HERO_STATE=$07`'s exact meaning and the `$C6`/`$C7` proximity
+check aren't confirmed yet - candidates noted in `spyhunter.asm` as `(???)`.
 
 ## Bonus: the attract-mode auto-drive routine
 
@@ -92,9 +133,15 @@ assembled bytes changed.
 
 ## Still open
 
-* Whether joystick 1's own fire button (`JOY1_FIRE_BTN`, `$4D0B`) is read
-  anywhere - it's written but no read site has been found yet in the
-  annotated code (may be in one of the remaining undissected blocks, or
-  genuinely unused).
 * The exact demo-AI logic in `ATTRACT_AUTODRIVE` (what `OBJ_TBL69`/`OBJ_TBL71`
   and `SCROLL_SPEED` mean in that specific context).
+* `HERO_STATE=$07`'s meaning (the gate on machine-gun fire at `$8CEF`), and
+  what `$C6`/`$C7` (read bare/unindexed at `$8CF9`-`$8CFD`) represent - a
+  proximity/cooldown check tied to firing, not yet named. If these fall
+  within the `SPR_STAGE` array's addressing (`$BA`-`$C9`, 2 bytes/slot),
+  they'd correspond to object slot 6's clamped sprite delta - possibly a
+  dedicated bullet/projectile slot, which would make this a "can't fire
+  again until the last shot clears" check. Not confirmed.
+* Full expansion of the ~1650-byte hero/object move-handler block itself
+  remains a separate future task - only the joystick-1-fire fragment inside
+  it has been traced so far.

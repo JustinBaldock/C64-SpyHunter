@@ -410,7 +410,11 @@ KEY_DEBOUNCE = $F0    ; key debounce timers
 DEMO_TIMER = $EE    ; attract/demo countdown (???)
 START_HELD = $EF    ; start-button held counter (???)
 KEY_LAST = $F3    ; last key seen
-GUN_HEAT = $F6    ; weapon/ammo counter (???)
+GUN_HEAT = $F6    ; machine-gun heat/cooldown gauge, decremented per shot at
+                  ;   $8CE0-$8D05 when JOY1_FIRE_BTN is pressed (HERO_STATE=$07
+                  ;   gate; exact recharge/reset mechanics not traced) - reset
+                  ;   to 0 alongside MISSILE_CNT/SMOKE_CNT on a water crash
+                  ;   (MOVE_BOAT_CRASH)
 MISSILE_CNT = $F7    ; active special-weapon charge: $FF full on pickup, dec per
                      ;   use ($FF->$EC seen dropping "smoke"). (???: name may be smoke)
 PANEL_X = $F8    ; panel draw column (???)
@@ -451,18 +455,30 @@ STATE_4D08 = $4D08
 ; regardless of which control method produced it:
 ;   [0] JOY_STATE   - speed delta: joystick 1 up=+1 (accelerate), down=-1 (brake)
 ;   [1] JOY_STATE+1 - steering delta: joystick 1 right=+1, left=-1
-;   [2] JOY1_FIRE_BTN ($4D0B) - joystick 1's own fire button (not seen read
-;       elsewhere in the annotated code yet)
+;   [2] JOY1_FIRE_BTN ($4D0B) - joystick 1's own fire button. CONFIRMED read
+;       at $8CE0, inside the still-undissected hero/object move-handler
+;       block after OBJINIT_PARAM_TBL (Stage 5): gates a DEC of GUN_HEAT
+;       ($F6) when HERO_STATE=$07 and a couple of other checks pass - this
+;       is almost certainly the MACHINE GUN fire trigger (GUN_HEAT acting
+;       as a per-shot heat/cooldown gauge, not literal ammo - matches
+;       MOVE_BOAT_CRASH clearing it to 0 alongside MISSILE_CNT/SMOKE_CNT on
+;       a crash). Not expanded into labelled instructions yet - that whole
+;       block is a substantial task of its own (see its header comment) -
+;       but the joystick-1-fire connection itself is confirmed.
 ;   [3] WEAPON_FIRE_INPUT ($4D0C) - joystick PORT 2's fire button, read
 ;       directly (not via the port-1 steering decode) - this is what
-;       UPDATE_WEAPONS (Stage 6) checks to fire the current weapon.
+;       UPDATE_WEAPONS (Stage 6) checks to fire the current SPECIAL weapon
+;       (smoke/missile, limited ammo via SMOKE_CNT/MISSILE_CNT).
 ; CONFIRMED (user-reported, verified by tracing READ_DUAL_JOYSTICK_INPUT
-; below): Spy Hunter is single-player only, but does read a SECOND
-; joystick port - its fire button, and only its fire button, triggers
-; weapons. This has nothing to do with CONTROL_SCHEME/DIFFICULTY_MODE below,
-; which were previously (incorrectly) named as if they were a 2-player mode.
+; below, and cross-checked against references/Commodore_64_memory_map.rtf's
+; CIA1 port bit layout): Spy Hunter is single-player only, but does read a
+; SECOND joystick port - its fire button, and only its fire button, fires
+; the special weapon; joystick 1's OWN fire button (same port as steering)
+; fires the machine gun instead. This has nothing to do with
+; CONTROL_SCHEME/DIFFICULTY_MODE below, which were previously (incorrectly)
+; named as if they were a 2-player mode.
 JOY_STATE = $4D09    ; decoded joystick/keyboard input (see above)
-JOY1_FIRE_BTN = $4D0B    ; joystick 1's own fire button (???: not read elsewhere yet)
+JOY1_FIRE_BTN = $4D0B    ; joystick 1's own fire button - fires the machine gun
 WEAPON_FIRE_INPUT = $4D0C    ; joystick 2's fire button - fires the current weapon
 IRQ_HALF = $4D0D    ; IRQ top/bottom toggle
 FRAME_SUBCTR = $4D0F    ; frame sub-counter
@@ -555,8 +571,11 @@ SID_VOL = $D418    ; master volume/filter
 ; --- CIA hardware registers, $DC00+/$DD00+: two "Complex Interface Adapter"
 ; chips handle the keyboard matrix, both joystick ports, and (via CIA2 port A)
 ; which 16 KB "bank" of RAM the VIC chip reads its screen/sprite data from.
-CIA1_PRA = $DC00    ; CIA1 port A (keyboard cols/joy2)
-CIA1_PRB = $DC01    ; CIA1 port B (keyboard rows/joy1)
+; CIA1_PRA/PRB bit layout (active-low; confirmed against
+; references/Commodore_64_memory_map.rtf): bit0=up, bit1=down, bit2=left,
+; bit3=right, bit4=fire, for whichever joystick port shares that register.
+CIA1_PRA = $DC00    ; CIA1 port A (keyboard cols/joy2 - bit4=joy2 fire)
+CIA1_PRB = $DC01    ; CIA1 port B (keyboard rows/joy1 - bit4=joy1 fire)
 CIA1_DDRA = $DC02    ; CIA1 data-dir A
 CIA1_ICR = $DC0D    ; CIA1 interrupt ctrl
 CIA2_PRA = $DD00    ; CIA2 port A (VIC bank select)
@@ -2618,6 +2637,13 @@ ALL_SLOTS_DONE:
 ; and the enemy-destroyed -> SCORE_EVENT scoring-tier logic actually live.
 ; Turning this into real, commented 6502 (rather than one big data blob) is
 ; a substantial task of its own, left for a future session.
+;
+; One spot IS confirmed: at $8CE0 (LDA $4D0B), this reads JOY1_FIRE_BTN
+; (joystick 1's own fire button) and gates a DEC of GUN_HEAT ($F6) when
+; HERO_STATE=$07 - the machine-gun fire trigger, paired with
+; WEAPON_FIRE_INPUT/joystick 2 firing the special weapon instead (see the
+; JOY_STATE equate comment near the top of this file, and
+; claude/Controls_And_Difficulty_Notes.md).
     .byte $AF,$8B,$D4,$8B,$5B,$8C,$5E,$8C,$5B,$8C,$5E,$8C,$90,$8C,$C2,$8C
     .byte $8E,$9A,$AA,$90,$8E,$9A,$AA,$90,$8E,$9A,$AA,$90,$8E,$9A,$AA,$90
     .byte $2E,$8B,$4D,$92,$F1,$99,$AA,$92,$F1,$99,$A2,$93,$80,$9A,$38,$8F

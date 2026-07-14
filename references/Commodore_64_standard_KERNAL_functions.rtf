@@ -1,0 +1,333 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2709
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Bold;\f1\froman\fcharset0 Times-Roman;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\sa398\qc\partightenfactor0
+
+\f0\b\fs48 \cf0 \expnd0\expndtw0\kerning0
+Commodore 64 standard KERNAL functions\
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrt\brdrs\brdrw20\brdrcf2 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalc \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalc \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\qc\partightenfactor0
+
+\fs32 \cf0 Address\cell 
+\pard\intbl\itap1\pardeftab720\qc\partightenfactor0
+\cf0 Function\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b0 \cf0 $FF81\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 SCINIT. Initialize VIC; restore default input/output to keyboard/screen; clear screen; set PAL/NTSC switch and interrupt timer.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A, X, Y.\u8232 Real address: $FF5B.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF84\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 IOINIT. Initialize CIA's, SID volume; setup memory configuration; set and start interrupt timer.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A, X.\u8232 Real address: $FDA3.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF87\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 RAMTAS. Clear memory addresses $0002-$0101 and $0200-$03FF; run memory test and set start and end address of BASIC work area accordingly; set screen memory to $0400 and datasette buffer to $033C.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A, X, Y.\u8232 Real address: $FD50.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF8A\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 RESTOR. Fill vector table at memory addresses $0314-$0333 with default values.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: \'96\u8232 Real address: $FD15.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF8D\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 VECTOR. Copy vector table at memory addresses $0314-$0333 from or into user table.\uc0\u8232 Input: Carry: 0 = Copy user table into vector table, 1 = Copy vector table into user table; X/Y = Pointer to user table.\u8232 Output: \'96\u8232 Used registers: A, Y.\u8232 Real address: $FD1A.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF90\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 SETMSG. Set system error display switch at memory address $009D.\uc0\u8232 Input: A = Switch value.\u8232 Output: \'96\u8232 Used registers: \'96\u8232 Real address: $FE18.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF93\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 LSTNSA. Send LISTEN secondary address to serial bus. (Must call LISTEN beforehands.)\uc0\u8232 Input: A = Secondary address.\u8232 Output: \'96\u8232 Used registers: A.\u8232 Real address: $EDB9.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF96\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 TALKSA. Send TALK secondary address to serial bus. (Must call TALK beforehands.)\uc0\u8232 Input: A = Secondary address.\u8232 Output: \'96\u8232 Used registers: A.\u8232 Real address: $EDC7.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF99\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 MEMTOP. Save or restore end address of BASIC work area.\uc0\u8232 Input: Carry: 0 = Restore from input, 1 = Save to output; X/Y = Address (if Carry = 0).\u8232 Output: X/Y = Address (if Carry = 1).\u8232 Used registers: X, Y.\u8232 Real address: $FE25.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF9C\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 MEMBOT. Save or restore start address of BASIC work area.\uc0\u8232 Input: Carry: 0 = Restore from input, 1 = Save to output; X/Y = Address (if Carry = 0).\u8232 Output: X/Y = Address (if Carry = 1).\u8232 Used registers: X, Y.\u8232 Real address: $FE34.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FF9F\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 SCNKEY. Query keyboard; put current matrix code into memory address $00CB, current status of shift keys into memory address $028D and PETSCII code into keyboard buffer.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A, X, Y.\u8232 Real address: $EA87.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFA2\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 SETTMO. Unknown. (Set serial bus timeout.)\uc0\u8232 Input: A = Timeout value.\u8232 Output: \'96\u8232 Used registers: \'96\u8232 Real address: $FE21.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFA5\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 IECIN. Read byte from serial bus. (Must call TALK and TALKSA beforehands.)\uc0\u8232 Input: \'96\u8232 Output: A = Byte read.\u8232 Used registers: A.\u8232 Real address: $EE13.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFA8\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 IECOUT. Write byte to serial bus. (Must call LISTEN and LSTNSA beforehands.)\uc0\u8232 Input: A = Byte to write.\u8232 Output: \'96\u8232 Used registers: \'96\u8232 Real address: $EDDD.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFAB\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 UNTALK. Send UNTALK command to serial bus.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A.\u8232 Real address: $EDEF.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFAE\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 UNLSTN. Send UNLISTEN command to serial bus.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A.\u8232 Real address: $EDFE.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFB1\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 LISTEN. Send LISTEN command to serial bus.\uc0\u8232 Input: A = Device number.\u8232 Output: \'96\u8232 Used registers: A.\u8232 Real address: $ED0C.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFB4\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 TALK. Send TALK command to serial bus.\uc0\u8232 Input: A = Device number.\u8232 Output: \'96\u8232 Used registers: A.\u8232 Real address: $ED09.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFB7\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 READST. Fetch status of current input/output device, value of ST variable. (For RS232, status is cleared.)\uc0\u8232 Input: \'96\u8232 Output: A = Device status.\u8232 Used registers: A.\u8232 Real address: $FE07.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFBA\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 SETLFS. Set file parameters.\uc0\u8232 Input: A = Logical number; X = Device number; Y = Secondary address.\u8232 Output: \'96\u8232 Used registers: \'96\u8232 Real address: $FE00.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFBD\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 SETNAM. Set file name parameters.\uc0\u8232 Input: A = File name length; X/Y = Pointer to file name.\u8232 Output: \'96\u8232 Used registers: \'96\u8232 Real address: $FDF9.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFC0\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 OPEN. Open file. (Must call SETLFS and SETNAM beforehands.)\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A, X, Y.\u8232 Real address: ($031A), $F34A.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFC3\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 CLOSE. Close file.\uc0\u8232 Input: A = Logical number.\u8232 Output: \'96\u8232 Used registers: A, X, Y.\u8232 Real address: ($031C), $F291.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFC6\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 CHKIN. Define file as default input. (Must call OPEN beforehands.)\uc0\u8232 Input: X = Logical number.\u8232 Output: \'96\u8232 Used registers: A, X.\u8232 Real address: ($031E), $F20E.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFC9\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 CHKOUT. Define file as default output. (Must call OPEN beforehands.)\uc0\u8232 Input: X = Logical number.\u8232 Output: \'96\u8232 Used registers: A, X.\u8232 Real address: ($0320), $F250.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFCC\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 CLRCHN. Close default input/output files (for serial bus, send UNTALK and/or UNLISTEN); restore default input/output to keyboard/screen.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A, X.\u8232 Real address: ($0322), $F333.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFCF\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 CHRIN. Read byte from default input (for keyboard, read a line from the screen). (If not keyboard, must call OPEN and CHKIN beforehands.)\uc0\u8232 Input: \'96\u8232 Output: A = Byte read.\u8232 Used registers: A, Y.\u8232 Real address: ($0324), $F157.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFD2\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 CHROUT. Write byte to default output. (If not screen, must call OPEN and CHKOUT beforehands.)\uc0\u8232 Input: A = Byte to write.\u8232 Output: \'96\u8232 Used registers: \'96\u8232 Real address: ($0326), $F1CA.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFD5\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 LOAD. Load or verify file. (Must call SETLFS and SETNAM beforehands.)\uc0\u8232 Input: A: 0 = Load, 1-255 = Verify; X/Y = Load address (if secondary address = 0).\u8232 Output: Carry: 0 = No errors, 1 = Error; A = KERNAL error code (if Carry = 1); X/Y = Address of last byte loaded/verified (if Carry = 0).\u8232 Used registers: A, X, Y.\u8232 Real address: $F49E.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFD8\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 SAVE. Save file. (Must call SETLFS and SETNAM beforehands.)\uc0\u8232 Input: A = Address of zero page register holding start address of memory area to save; X/Y = End address of memory area plus 1.\u8232 Output: Carry: 0 = No errors, 1 = Error; A = KERNAL error code (if Carry = 1).\u8232 Used registers: A, X, Y.\u8232 Real address: $F5DD.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFDB\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 SETTIM. Set Time of Day, at memory address $00A0-$00A2.\uc0\u8232 Input: A/X/Y = New TOD value.\u8232 Output: \'96\u8232 Used registers: \'96\u8232 Real address: $F6E4.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFDE\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 RDTIM. read Time of Day, at memory address $00A0-$00A2.\uc0\u8232 Input: \'96\u8232 Output: A/X/Y = Current TOD value.\u8232 Used registers: A, X, Y.\u8232 Real address: $F6DD.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFE1\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 STOP. Query Stop key indicator, at memory address $0091; if pressed, call CLRCHN and clear keyboard buffer.\uc0\u8232 Input: \'96\u8232 Output: Zero: 0 = Not pressed, 1 = Pressed; Carry: 1 = Pressed.\u8232 Used registers: A, X.\u8232 Real address: ($0328), $F6ED.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFE4\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 GETIN. Read byte from default input. (If not keyboard, must call OPEN and CHKIN beforehands.)\uc0\u8232 Input: \'96\u8232 Output: A = Byte read.\u8232 Used registers: A, X, Y.\u8232 Real address: ($032A), $F13E.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFE7\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 CLALL. Clear file table; call CLRCHN.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A, X.\u8232 Real address: ($032C), $F32F.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFEA\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 UDTIM. Update Time of Day, at memory address $00A0-$00A2, and Stop key indicator, at memory address $0091.\uc0\u8232 Input: \'96\u8232 Output: \'96\u8232 Used registers: A, X.\u8232 Real address: $F69B.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFED\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 SCREEN. Fetch number of screen rows and columns.\uc0\u8232 Input: \'96\u8232 Output: X = Number of columns (40); Y = Number of rows (25).\u8232 Used registers: X, Y.\u8232 Real address: $E505.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFF0\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 PLOT. Save or restore cursor position.\uc0\u8232 Input: Carry: 0 = Restore from input, 1 = Save to output; X = Cursor column (if Carry = 0); Y = Cursor row (if Carry = 0).\u8232 Output: X = Cursor column (if Carry = 1); Y = Cursor row (if Carry = 1).\u8232 Used registers: X, Y.\u8232 Real address: $E50A.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trwWidth24440\trftsWidth3 \trbrdrl\brdrs\brdrw20\brdrcf2 \trbrdrb\brdrs\brdrw20\brdrcf2 \trbrdrr\brdrs\brdrw20\brdrcf2 
+\clvertalt \clshdrawnil \clwWidth3562\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx4320
+\clvertalt \clshdrawnil \clwWidth20558\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt20 \clpadl20 \clpadb20 \clpadr20 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 $FFF3\cell 
+\pard\intbl\itap1\pardeftab720\sa320\qj\partightenfactor0
+\cf0 IOBASE. Fetch CIA #1 base address.\uc0\u8232 Input: \'96\u8232 Output: X/Y = CIA #1 base address ($DC00).\u8232 Used registers: X, Y.\u8232 Real address: $E500.\cell \lastrow\row
+}

@@ -4638,9 +4638,46 @@ COPY_BLOCK_ROW_DONE:
 MAP_COPY_BLOCK_DONE:
     rts
 ; -----------------------------------------------------------------------
-; Small mirror/fill helper fragment stored as data.
-    .byte $A9,$FF,$2C,$A9,$01,$84,$08,$18,$65,$34,$30,$13,$C9,$05,$B0,$0F
-    .byte $48,$A5,$33,$25,$08,$D0,$07,$68,$85,$34,$0A,$85,$35,$24,$68,$60
+; -----------------------------------------------------------------------
+; SPEED_STEP: nudges SCROLL_SPEED (and ROAD_X_REF, doubled) by one step,
+; throttled by a caller-supplied frame-counter bitmask - now fully
+; converted to labelled instructions (previously "small mirror/fill helper
+; fragment stored as data", a guessed name that doesn't match what this
+; code actually does). No confirmed caller yet (likely lives in one of the
+; still-undissected blocks), but the BIT-absolute/zp "2-byte skip" overlap
+; entries below match the same multi-entry idiom used throughout this file
+; (e.g. HAZARD_CHECK_0C/0B/0A), strongly suggesting two real entry points:
+;   - SPEED_STEP_DOWN (fallthrough): A=-1 (decelerate)
+;   - SPEED_STEP_UP (direct entry): A=+1 (accelerate)
+; Y (saved to ZTMP_08) is presumably a period bitmask - the routine only
+; commits the change when FRAME_CTR AND that mask is zero, i.e. once every
+; N frames - then bails without applying if the result would go negative or
+; reach 5 (keeping SCROLL_SPEED in the range 0-4). (???: no confirmed caller
+; or precise meaning of ROAD_X_REF's role here.)
+SPEED_STEP_DOWN:
+    lda #$FF
+    .byte $2C
+SPEED_STEP_UP:
+    .byte $A9,$01
+    sty ZTMP_08
+    clc
+    adc SCROLL_SPEED
+    bmi SPEED_STEP_DONE
+    cmp #$05
+    bcs SPEED_STEP_DONE
+    pha
+    lda FRAME_CTR
+    and ZTMP_08
+    bne SPEED_STEP_SKIP
+    pla
+    sta SCROLL_SPEED
+    asl
+    sta ROAD_X_REF
+    .byte $24
+SPEED_STEP_SKIP:
+    .byte $68
+SPEED_STEP_DONE:
+    rts
 
 ; -----------------------------------------------------------------------
 ; Pseudo-random step: RNG_SEED = RNG_SEED + A, then EOR VIC_RASTER.

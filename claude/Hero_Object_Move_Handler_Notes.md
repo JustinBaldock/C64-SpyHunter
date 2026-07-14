@@ -125,11 +125,10 @@ registers $D017/$D01C/$D01D/$D027).
 
 ## Still open
 
-* `HERO_STATE=$07`'s specific meaning (beyond "the state the machine gun
-  works in").
-* What `$C6`/`$C7` actually represent.
+* `HERO_STATE=$07` and `$C6`/`$C7` are now resolved - see
+  `claude/Enemy_Scoring_Notes.md`.
 * The six data tables and two subroutines the `COMMIT_TYPE` tail reads/calls
-  - live in the next undissected block.
+  are now converted - see `claude/Draw_Handler_Notes.md`.
 * Slot 1's (`MOVE_HERO`'s) full semantics - only the control-flow shape is
   traced, not what each `SEQ_STATE`/sub-state transition represents in
   gameplay terms.

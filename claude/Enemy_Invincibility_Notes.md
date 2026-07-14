@@ -63,6 +63,15 @@ hit-detection against other slots.
   manual: it's not a flag, it's just that the Road Lord's code path never registers a hit,
   presumably because collision/weapon-hit handling checks its `OBJ_TYPE` specifically and skips
   it — not yet traced to the actual comparison in code).
+
+  **Update (`claude/Enemy_Scoring_Notes.md`):** `TYPE=$0C` is now the leading candidate for the
+  Road Lord on independent code-level evidence (its `MOVE_TYPE_0C` handler awards the 150-point
+  tier via a distinctive multi-frame decrementing score, unlike the other 150-tier types' one-shot
+  award) - this snapshot's `slot 2 TYPE=$0C` sighting, captured before that tracing was done,
+  lines up with the later finding rather than contradicting it. `$05` is not one of the tier-3/4/5
+  scoring types traced there, so it's likely ordinary boat/traffic, not the Road Lord. No hard
+  "bulletproof, excluded from all bullet hits" flag was found for `$0C` though - see that doc's
+  open questions.
 - **Revised hypothesis for `HERO_STATE=$11`:** given the manual says the Road Lord can *only* be
   defeated by ramming, `$11` may be a ramming/collision sub-state rather than anything related to
   the miss itself — i.e. this snapshot may have caught the moment the player rammed the Road Lord

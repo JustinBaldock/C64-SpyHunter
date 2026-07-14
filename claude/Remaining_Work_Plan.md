@@ -33,14 +33,22 @@ motivation for prioritising #26 - see Phase 2 below, still open.
 Now that all code is converted and readable, these are pure semantic-
 identification questions rather than "find the code" questions:
 
-- **#32** - Where does `OBJ_TYPE` map down to a `POINTS_TBL` kill tier
-  (0/500/700) when an enemy is destroyed? `SCORE_EVENT`'s queue-write site
-  hasn't been located yet.
-- **#33** - Which `OBJ_TYPE` values are the Road Lord, Switch Blade, and
-  The Enforcer? (The Copter at `$08` and the boat enemies at `$13` are
-  already confirmed; these three aren't.)
-- **#34** - What does `HERO_STATE=$07` mean (the gate on machine-gun fire),
-  and what do `$C6`/`$C7` represent (the proximity/cooldown check)?
+- ~~**#32**~~ - **Done**, see `claude/Enemy_Scoring_Notes.md`. `SCORE_EVENT`'s
+  write site is `ARM_SCORE_EVENT`/`ARM_SCORE_EVENT_X8`; each enemy
+  `MOVE_TYPE_*` handler hardcodes its own kill-tier index, no lookup table.
+- ~~**#33**~~ - **Done**, see `claude/Enemy_Scoring_Notes.md`. `$07`=Copter
+  (high confidence, code-derived), `$13`=Barrel Dumper (high),
+  `$0C`=Road Lord/`$0D`=Switch Blade (moderate, from a scoring-behaviour
+  asymmetry), `$09`=Enforcer (moderate, possibly shared with Doctor
+  Torpedo - open). Also found `$11` is very likely the hero's own default
+  state, not an enemy at all - reopens what `$08` actually is (see that
+  doc).
+- ~~**#34**~~ - **Done**, see `claude/Enemy_Scoring_Notes.md`. `HERO_STATE=$07`
+  is confirmed as the exact required value for machine-gun fire (a hero
+  substate that happens to numerically coincide with the Copter's
+  `OBJ_TYPE`, harmlessly). `$C6`/`$C7` identified as `SPR_STAGE` entry 6
+  (hardware sprite 6's clamped delta) - the exact runtime semantics of
+  *which* object's delta it holds at fire time is still open.
 - **#37** - `MOVE_HERO`'s full `SEQ_STATE`/`ROAD_FEATURE` state-machine -
   structurally traced and converted to real instructions already, but not
   yet mapped to specific gameplay moments (candidate: boathouse/bridge

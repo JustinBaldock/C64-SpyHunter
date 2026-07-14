@@ -60,13 +60,29 @@ by spotting a **locomotion-class flag** distinct from the boat-mode flag already
 | `$05, $06, $0C, $0D, $0E, $14, $16` | Seen across many otherwise-unremarkable driving snapshots | Still most consistent with ordinary background traffic rather than named agents - `$05` especially, given how often it recurs |
 
 None of this is definitive - it's correlation across a handful of snapshots, not a traced
-collision-handler read. But `$08` = The Copter now has two independent, mutually-reinforcing data
-points (same unusual flag pattern, different snapshots), which is a meaningfully stronger claim
-than a single-snapshot guess. Still open: the Road Lord, Switch Blade, and Enforcer haven't been
-pinned to a specific byte value at all yet - none of the snapshots so far capture a moment where
-one of those three is both on-screen and visually unambiguous, and scoring
-(`TALLY_SCORE_EVENTS`/`POINTS_TBL_LO`/`POINTS_TBL_HI`) hasn't been cross-referenced against a
-captured kill moment either.
+collision-handler read.
+
+**Update - resolved via the collision-handler code directly (`claude/Enemy_Scoring_Notes.md`):**
+`SCORE_EVENT`'s queue-write site has now been located and fully traced (tasks #32/#33). Each
+enemy `OBJ_TYPE`'s own `MOVE_TYPE_*` handler hardcodes which `POINTS_TBL` kill tier it awards,
+giving a much stronger, code-level identification:
+
+| `OBJ_TYPE` | Kill tier | Identity | Confidence |
+|---|---|---|---|
+| `$07` | 700 (tier 5, alone) | **The Copter (Mad Bomber)** | High |
+| `$13` | 150 (tier 3) + confirmed boat | **Barrel Dumper** | High |
+| `$0C` | 150 (tier 3), multi-frame scoring | **The Road Lord** | Moderate |
+| `$0D` | 150 (tier 3), single-hit scoring | **Switch Blade** | Moderate |
+| `$09` | 500 (tier 4) | **The Enforcer** (possibly shared with Doctor Torpedo) | Moderate |
+| `$11` | n/a - excluded from bullet hits | Not an enemy - the hero's own default `HERO_STATE` | Moderate |
+| `$08` | not traced to a score tier | Still just the airborne-locomotion correlation below - not confirmed against the scoring path | Low (superseded lead: see `$07` above for the Copter) |
+
+Full reasoning, including why `$0C`/`$0D` split the way they do and the open Doctor Torpedo
+question, is in `claude/Enemy_Scoring_Notes.md`. This mostly supersedes the locomotion-flag
+correlation below, EXCEPT that it re-opens what `$08` actually is, since `$07` (not `$08`) is now
+the code-confirmed Copter - `$08`'s "airborne" flag evidence still stands on its own (see next
+section) and the two may simply be closely-related (e.g. the Copter's body vs. a paired
+hit-registration sub-object), not necessarily the same identification.
 
 ## Scoring (complete, from the manual)
 
@@ -104,13 +120,13 @@ interleaved lo/hi BCD-pair array read by `ADD_SCORE`, `disassembly/spyhunter.asm
 Every one of the manual's numbers is accounted for by exactly one table entry - a full, confirmed
 match, not just a plausible guess. This also reveals the table's real structure: it's **3 kill
 tiers** (150/500/700), not 6 individual per-enemy entries - Road Lord/Switch Blade/Barrel Dumper
-share entry 3, and Enforcer/Doctor Torpedo share entry 4. So whatever selects an index into this
-table on enemy destruction must first map `OBJ_TYPE` (or similar) down to a tier (0-2), which is a
-promising lead for the "which `OBJ_TYPE` is which enemy" problem above - `SCORE_EVENT` (`$4DC3`,
-queued events consumed by `TALLY_SCORE_EVENTS`) is written somewhere outside
-`TALLY_SCORE_EVENTS` itself (not yet located - likely in the collision/hit-detection code, not
-yet annotated as of this session's Stage 4) with the OBJ_TYPE-to-tier mapping happening at that
-write site.
+share entry 3, and Enforcer/Doctor Torpedo share entry 4.
+
+**Update - the `OBJ_TYPE`-to-tier mapping is now traced (`claude/Enemy_Scoring_Notes.md`).**
+`SCORE_EVENT`'s write site is `ARM_SCORE_EVENT`/`ARM_SCORE_EVENT_X8` in the collision-detection
+block; there's no lookup table - each enemy `OBJ_TYPE`'s own `MOVE_TYPE_*` handler hardcodes its
+tier index as a literal constant before calling it. See the table above and
+`claude/Enemy_Scoring_Notes.md` for the full per-type breakdown.
 
 ## Other manual details worth keeping
 

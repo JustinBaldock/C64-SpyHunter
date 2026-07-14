@@ -185,7 +185,12 @@ Investigated by searching every reference to `$DC00`/`$DC01` and to
 
 * The exact demo-AI logic in `ATTRACT_AUTODRIVE` (what `OBJ_TBL69`/`OBJ_TBL71`
   and `SCROLL_SPEED` mean in that specific context).
-* `HERO_STATE=$07`'s meaning (the gate on machine-gun fire), and exactly
-  what `$C6`/`$C7` represent (see `claude/Hero_Object_Move_Handler_Notes.md`).
-* The full per-object handler blocks after `INIT_OBJECT_SLOT` and
-  `MUSIC_START_THEME` remain separate future tasks.
+
+`HERO_STATE=$07`'s meaning and `$C6`/`$C7` are now resolved - see
+`claude/Enemy_Scoring_Notes.md` (`HERO_STATE=$07` = the hero's normal
+drivable/combat-ready substate, numerically coincident with but unrelated
+to the Copter's own `OBJ_TYPE=$07`; `$C6`/`$C7` = `SPR_STAGE` entry 6,
+hardware sprite 6's clamped delta from whichever object last ran
+`OBJ_CALC_SPRITE_DELTA`). The per-object handler blocks after
+`INIT_OBJECT_SLOT` and `MUSIC_START_THEME` are also done - see
+`claude/Draw_Handler_Notes.md`.

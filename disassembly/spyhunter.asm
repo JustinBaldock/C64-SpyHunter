@@ -490,9 +490,11 @@ STATE_4D08 = $4D08
 ; CONTROL_SCHEME/DIFFICULTY_MODE below, which were previously (incorrectly)
 ; named as if they were a 2-player mode.
 JOY_STATE = $4D09    ; decoded joystick/keyboard input (see above)
+STATE_4D0A = $4D0A    ; state byte, used by DRAW_STATE_4D89_PREP (???)
 JOY1_FIRE_BTN = $4D0B    ; joystick 1's own fire button - fires the machine gun
 WEAPON_FIRE_INPUT = $4D0C    ; joystick 2's fire button - fires the current weapon
 IRQ_HALF = $4D0D    ; IRQ top/bottom toggle
+STATE_4D0E = $4D0E    ; state byte, used by DRAW_STATE_4D89_PREP (???)
 FRAME_SUBCTR = $4D0F    ; frame sub-counter
 STATE_4D10 = $4D10
 ; CONTROL_SCHEME: an input-METHOD choice, NOT a player count - confirmed by
@@ -528,18 +530,30 @@ HIT_ACCUM = $4D22    ; collision accumulator
 OBJ_TBL23 = $4D23    ; per-slot value, written alongside OBJ_TBL2B/SPRITE_PTRS (???)
 SPRITE_PTRS = $4D2B    ; sprite pointer shadow (copied to $7BF8 each frame)
 OBJ_TBL33 = $4D33    ; per-slot value (???)
+STATE_4D34 = $4D34    ; per-slot draw-timer value, used by the shared
+                       ;   "decrement/loop" draw-routine tail (???)
+STATE_4D39 = $4D39    ; state byte (???)
 OBJ_TBL3B = $4D3B    ; per-slot value, low nibble of a signed offset (???)
 OBJ_TBL43 = $4D43    ; per-slot value, low nibble of a signed offset (???)
+STATE_4D44 = $4D44    ; state byte, indexes DRAW_T07_TAIL_TBL (???)
 OBJ_TBL4B = $4D4B    ; per-slot value, low nibble of a signed offset (???)
 OBJ_TBL53 = $4D53    ; per-slot value, combines OBJ_TBL3B/4B/43 nibbles (???)
+STATE_4D54 = $4D54    ; state byte (???)
 OBJ_TBL5B = $4D5B    ; per-slot value (???)
+STATE_4D5C = $4D5C    ; state byte (???)
+STATE_4D61 = $4D61    ; state byte (???)
 OBJ_TBL63 = $4D63
+STATE_4D64 = $4D64    ; state byte (???)
 OBJ_TBL69 = $4D69
 OBJ_TBL6B = $4D6B
+STATE_4D6C = $4D6C    ; state byte (???)
 OBJ_TBL71 = $4D71
 OBJ_TBL73 = $4D73
+STATE_4D74 = $4D74    ; state byte (???)
 OBJ_TBL79 = $4D79
 OBJ_TBL7B = $4D7B    ; per-slot hazard-check value (HAZARD_CHECK_CHAIN)
+STATE_4D7C = $4D7C    ; state byte (???)
+STATE_4D81 = $4D81    ; state byte (???)
 STATE_4D83 = $4D83    ; per-slot: swap-target slot index / "paired with" (???)
 STATE_4D84 = $4D84    ; single flag/counter, not per-slot (???)
 STATE_4D89 = $4D89    ; boat: "already crashed/handled this frame" flag (???)
@@ -549,12 +563,14 @@ OBJ_TBL9B = $4D9B    ; per-slot value, combined with OBJ_TBLA3 (???)
 OBJ_TBLA3 = $4DA3    ; per-slot value, combined with OBJ_TBL9B (???)
 OBJ_TBLAB = $4DAB
 STATE_4DAC = $4DAC
+STATE_4DAE = $4DAE    ; state byte (???)
 OBJ_TBLB3 = $4DB3
 STATE_4DB9 = $4DB9
 OBJ_TBLBB = $4DBB
 STATE_4DC1 = $4DC1
 SCORE_EVENT = $4DC3    ; queued score events
 STAT_CTR = $4DC4    ; statistic counters
+STATE_4DC9 = $4DC9    ; state byte (???)
 STATE_4DCA = $4DCA    ; short countdown, armed to $3C (60) on a hazard/hit event (???)
 STATE_4DCB = $4DCB
 ; --- VIC-II (video chip) hardware registers, memory-mapped at $D000-$D02E.
@@ -2804,8 +2820,8 @@ ALL_SLOTS_DONE:
 ; All five converge on a shared tail (COMMIT_TYPE) that commits the new
 ; OBJ_TYPE and reinitialises the slot's sprite pointer, hit-group masks,
 ; VIC sprite-multicolour/expand bits and X/Y position deltas from data
-; tables at $8EAC/$8EE4/$8F00/$8E90/$8EC8/$8E74 - those tables live in the
-; NEXT undissected block (after INIT_OBJECT_SLOT) and aren't decoded yet.
+; tables TYPE_TBL_93/SPRPTR/ANIM/HITGRP/SPRATTR/A3 (see the block after
+; INIT_OBJECT_SLOT, claude/Draw_Handler_Notes.md).
 ;
 ; Several BIT-absolute/zp "2-byte skip" multi-entry tricks (the same idiom
 ; documented at HAZARD_CHECK_0C/0B/0A) are kept as raw bytes with labels at
@@ -3051,7 +3067,7 @@ TYPE_ANIM_BUSY:
 COMMIT_TYPE:
     sta OBJ_TYPE,x
     tay
-    lda $8F1C,y
+    lda TYPE_TBL_VEL,y
     pha
     and #$03
     asl
@@ -3075,14 +3091,14 @@ COMMIT_YVEL_DONE:
     ora #$F0
 COMMIT_TYPE_CONT:
     sta OBJ_TBL53,x
-    lda $8EAC,y
+    lda TYPE_TBL_93,y
     sta OBJ_TBL93,x
-    lda $8EE4,y
+    lda TYPE_TBL_SPRPTR,y
     sta SPRITE_PTRS,x
     sta OBJ_TBL23,x
-    lda $8F00,y
+    lda TYPE_TBL_ANIM,y
     sta OBJ_ANIM,x
-    lda $8E90,y
+    lda TYPE_TBL_HITGRP,y
     sta ZTMP_08
     and #$3F
     sta OBJ_TBL9B,x
@@ -3106,7 +3122,7 @@ COMMIT_HITGROUP2_NEG:
     and HIT_GROUP2
 COMMIT_HITGROUP2_DONE:
     sta HIT_GROUP2
-    lda $8EC8,y
+    lda TYPE_TBL_SPRATTR,y
     sta ZTMP_08
     and #$0F
     sta VIC_SPR_COLOR,x
@@ -3140,7 +3156,7 @@ COMMIT_SPRYEXP_NEG:
     and VIC_SPR_YEXP
 COMMIT_SPRYEXP_DONE:
     sta VIC_SPR_YEXP
-    lda $8E74,y
+    lda TYPE_TBL_A3,y
     sta ZTMP_08
     and #$0F
     sta OBJ_TBLA3,x
@@ -3220,103 +3236,655 @@ INIT_OBJECT_SLOT:
     clc
     rts
 ; -----------------------------------------------------------------------
-; More per-object-type/hero state-machine handler CODE stored as raw data,
-; same situation as the block right after PROCESS_OBJECTS above (only
-; reachable indirectly via the ZVEC_MOVE/ZVEC_DRAW/VEC_STATE dispatch
-; vectors, so never picked up as code by a straight-line disassembly pass).
-; This is a substantial chunk (~80 lines) - almost certainly containing the
-; individual behaviour of each enemy type (weapons, movement patterns) and
-; the hero's own crash/collision handling. Left as a labelled-but-unexpanded
-; data block for a future session rather than hand-disassembled here; see
-; the equivalent note after PROCESS_OBJECTS for how to start tracing it
-; (each 3-byte "opcode + address" or 2-byte "opcode + value" group can be
-; decoded by hand against a 6502 opcode table).
+; Per-object DRAW handlers for OBJ_TYPEs $00-$05/$07/$08 (the hero's own type
+; range plus a few more enemy/effect types) - the counterpart to
+; claude/Draw_Handler_Notes.md's block, dispatched the same way via
+; OBJINIT_PARAM_TBL's draw-vector column -> ZVEC_DRAW -> OBJ_VEC2_DISPATCH.
+; Also holds the 7 per-OBJ_TYPE initialisation tables (TYPE_TBL_*, 28 bytes
+; each) that COMMIT_TYPE (Stage 5, hero/object move-handler block) reads to
+; set up a freshly-committed object's sprite pointer, hit groups, VIC
+; sprite-attribute bits, animation frame and velocity nibbles - COMMIT_TYPE's
+; own raw-hex references to these tables have been updated to use the names
+; below.
+;
+; DRAW_TBL_T00 (TYPE $00-$03, the hero) has by far the most frames (10) -
+; consistent with the hero being the most complex-to-animate object. Two
+; more small byte-indexed tables (DRAW_T07_TAIL_TBL, DRAW_T00_F3_TBL) are
+; read via indexed LDA/ADC from within their neighbouring routines, the same
+; idiom as the two byte tables in the previous block.
+;
+; TYPE semantics are not interpreted here, same disclaimer as the previous
+; block - this is a mechanical data-to-code conversion pass. Two more
+; "BIT-absolute as a 2-byte skip" overlap tricks are kept as raw bytes with
+; labels at each entry point.
+TYPE_TBL_A3:
     .byte $44,$04,$04,$04,$04,$66,$04,$04,$00,$86,$04,$06,$86,$82,$86,$86
-    .byte $86,$64,$94,$94,$00,$04,$04,$04,$52,$00,$04,$04,$D0,$D0,$D0,$D0
-    .byte $10,$CC,$CE,$58,$58,$CC,$48,$4C,$CC,$D2,$CC,$CC,$CA,$5A,$D0,$D0
-    .byte $18,$0C,$10,$18,$D4,$08,$02,$46,$20,$20,$20,$20,$07,$15,$16,$1E
-    .byte $20,$1C,$01,$0E,$15,$14,$11,$14,$11,$0A,$1C,$16,$15,$10,$11,$15
-    .byte $20,$06,$10,$0B,$2A,$2A,$2A,$2A,$00,$04,$2A,$0A,$81,$2A,$0E,$28
-    .byte $0A,$0A,$03,$0A,$08,$C3,$2F,$2A,$08,$08,$06,$08,$2A,$81,$20,$0A
+    .byte $86,$64,$94,$94,$00,$04,$04,$04,$52,$00,$04,$04
+TYPE_TBL_HITGRP:
+    .byte $D0,$D0,$D0,$D0,$10,$CC,$CE,$58,$58,$CC,$48,$4C,$CC,$D2,$CC,$CC
+    .byte $CA,$5A,$D0,$D0,$18,$0C,$10,$18,$D4,$08,$02,$46
+TYPE_TBL_93:
+    .byte $20,$20,$20,$20,$07,$15,$16,$1E,$20,$1C,$01,$0E,$15,$14,$11,$14
+    .byte $11,$0A,$1C,$16,$15,$10,$11,$15,$20,$06,$10,$0B
+TYPE_TBL_SPRATTR:
+    .byte $2A,$2A,$2A,$2A,$00,$04,$2A,$0A,$81,$2A,$0E,$28,$0A,$0A,$03,$0A
+    .byte $08,$C3,$2F,$2A,$08,$08,$06,$08,$2A,$81,$20,$0A
+TYPE_TBL_SPRPTR:
     .byte $5F,$5C,$5D,$5E,$8C,$50,$83,$68,$6D,$72,$8D,$90,$71,$78,$74,$73
-    .byte $7B,$93,$80,$86,$64,$64,$8F,$64,$75,$77,$91,$92,$04,$09,$09,$09
-    .byte $03,$03,$01,$03,$03,$02,$02,$01,$00,$00,$00,$00,$00,$01,$00,$01
-    .byte $01,$05,$03,$02,$02,$00,$01,$01,$D6,$DA,$DA,$DA,$00,$00,$00,$FC
-    .byte $00,$73,$00,$00,$AB,$CA,$CA,$BF,$DD,$00,$CD,$B9,$00,$00,$00,$00
-    .byte $C6,$00,$00,$00,$58,$8F,$84,$8F,$04,$90,$0D,$90,$00,$04,$01,$38
-    .byte $66,$A3,$A9,$00,$85,$FF,$60,$20,$0E,$A1,$29,$3F,$8D,$5C,$4D,$A9
-    .byte $01,$85,$FF,$60,$A0,$1C,$20,$7A,$AA,$A5,$CD,$C9,$09,$90,$E0,$4C
-    .byte $E9,$8F,$C6,$9B,$A9,$00,$85,$AB,$A9,$02,$8D,$54,$4D,$A5,$FF,$48
-    .byte $A9,$FF,$85,$FF,$68,$10,$08,$A9,$01,$8D,$5C,$4D,$20,$9D,$A2,$60
-    .byte $AD,$AC,$4D,$D0,$DD,$A5,$FF,$10,$03,$4C,$FD,$8F,$D0,$03,$20,$4B
-    .byte $8F,$A5,$C6,$0A,$08,$C9,$02,$90,$1D,$28,$90,$0C,$AD,$44,$4D,$F0
-    .byte $03,$CE,$44,$4D,$A9,$FF,$D0,$11,$AD,$44,$4D,$C9,$02,$B0,$03,$EE
-    .byte $44,$4D,$A9,$01,$D0,$03,$28,$A9,$00,$85,$AB,$A5,$D7,$38,$E9,$3C
-    .byte $E5,$CD,$F0,$31,$B0,$03,$A9,$FF,$2C,$A9,$01,$8D,$54,$4D,$AC,$44
-    .byte $4D,$B9,$40,$8F,$8D,$34,$4D,$AD,$17,$D0,$88,$D0,$03,$05,$05,$2C
-    .byte $25,$10,$8D,$17,$D0,$AD,$54,$4D,$48,$20,$D8,$99,$68,$20,$FB,$98
-    .byte $A6,$06,$4C,$9D,$A2,$A9,$00,$F0,$D2,$A9,$00,$85,$AB,$4C,$EC,$8F
-    .byte $A5,$C7,$30,$E1,$C6,$9B,$4C,$4B,$8F,$C6,$9B,$C6,$AB,$A9,$FA,$85
-    .byte $CD,$A5,$05,$05,$DA,$85,$DA,$A9,$20,$85,$CC,$20,$A8,$AA,$A0,$1A
-    .byte $4C,$7A,$AA,$2F,$90,$40,$90,$4B,$90,$58,$90,$A9,$04,$85,$9A,$A9
-    .byte $01,$20,$76,$90,$E9,$0C,$20,$96,$90,$4C,$64,$90,$A9,$00,$20,$76
-    .byte $90,$20,$96,$90,$4C,$64,$90,$A9,$02,$20,$76,$90,$20,$96,$90,$E9
-    .byte $15,$4C,$64,$90,$A9,$03,$20,$76,$90,$E9,$0C,$20,$96,$90,$E9,$15
-    .byte $85,$CB,$A6,$06,$C6,$9A,$20,$D8,$99,$AD,$15,$D0,$09,$01,$8D,$15
-    .byte $D0,$60,$8D,$33,$4D,$AD,$15,$D0,$29,$FE,$8D,$15,$D0,$A5,$DA,$4A
-    .byte $4A,$A5,$CC,$6A,$26,$08,$AE,$44,$4D,$18,$7D,$93,$90,$38,$60,$03
-    .byte $05,$08,$66,$08,$2A,$08,$85,$CA,$A5,$DA,$4A,$28,$2A,$85,$DA,$A9
-    .byte $07,$18,$65,$CD,$38,$60,$BE,$90,$C9,$90,$DD,$90,$E3,$90,$21,$91
-    .byte $64,$91,$AB,$91,$E2,$91,$04,$92,$38,$92,$8E,$AC,$4D,$4C,$DC,$91
-    .byte $C6,$9B,$4C,$65,$99,$A2,$FF,$86,$B3,$AD,$74,$4D,$D0,$06,$C6,$9B
-    .byte $EE,$54,$4D,$E8,$86,$AB,$4C,$19,$91,$A5,$A1,$D0,$E5,$F0,$E1,$A9
-    .byte $00,$CD,$64,$4D,$D0,$0A,$CD,$74,$4D,$D0,$05,$CD,$6C,$4D,$F0,$2D
-    .byte $20,$06,$A1,$A9,$01,$85,$B3,$A5,$CD,$C9,$A0,$F0,$C3,$A2,$00,$AD
-    .byte $64,$4D,$F0,$0E,$C9,$03,$F0,$0B,$C9,$04,$F0,$07,$C9,$05,$F0,$03
-    .byte $CA,$CA,$E8,$86,$AB,$A6,$06,$20,$65,$99,$4C,$00,$99,$A5,$34,$F0
-    .byte $18,$C9,$01,$F0,$19,$CE,$08,$4D,$A0,$0F,$20,$EE,$A0,$A9,$00,$38
-    .byte $E5,$35,$85,$B3,$C6,$B3,$4C,$DC,$91,$A9,$01,$20,$06,$A1,$A9,$FD
-    .byte $85,$B3,$A9,$01,$85,$AB,$AE,$64,$4D,$F0,$CA,$AE,$74,$4D,$F0,$C5
-    .byte $A9,$00,$85,$AB,$A6,$CD,$E0,$90,$B0,$BB,$85,$B3,$C6,$9B,$10,$B5
-    .byte $A5,$10,$8D,$20,$4D,$A5,$B8,$8D,$54,$4D,$A5,$C7,$30,$10,$C9,$32
-    .byte $B0,$0C,$C9,$1E,$90,$0C,$A5,$C6,$29,$7F,$C9,$01,$90,$10,$E6,$9B
-    .byte $D0,$09,$C6,$9B,$A9,$04,$85,$A0,$8D,$05,$4D,$EE,$07,$4D,$CE,$08
-    .byte $4D,$A5,$CD,$C9,$65,$B0,$0D,$38,$A9,$00,$E5,$35,$10,$06,$C9,$F8
-    .byte $F0,$02,$85,$B3,$4C,$DC,$91,$A5,$C7,$30,$1C,$C9,$31,$B0,$DC,$C9
-    .byte $27,$90,$1D,$A5,$C6,$29,$7F,$C9,$01,$B0,$D0,$38,$66,$A9,$EE,$54
-    .byte $4D,$E6,$B3,$C6,$9B,$D0,$C4,$29,$7F,$C9,$35,$90,$03,$EE,$07,$4D
-    .byte $A6,$B8,$CA,$8E,$54,$4D,$A6,$06,$20,$65,$99,$4C,$F3,$97,$A9,$58
-    .byte $85,$FB,$85,$CC,$A9,$FD,$25,$DA,$85,$DA,$A5,$CD,$C9,$F0,$A9,$00
-    .byte $90,$04,$C6,$9B,$85,$FB,$CE,$5C,$4D,$D0,$02,$85,$9B,$4C,$65,$99
-    .byte $A9,$DC,$85,$FB,$85,$CC,$A9,$FD,$25,$DA,$85,$DA,$A5,$CD,$C9,$10
-    .byte $B0,$05,$18,$69,$0C,$85,$CD,$A5,$49,$C9,$03,$D0,$0D,$A9,$04,$85
-    .byte $9B,$A2,$00,$86,$FB,$A6,$06,$4C,$65,$99,$AD,$03,$D0,$C9,$F0,$90
-    .byte $F4,$66,$A3,$60,$A9,$15,$C5,$45,$F0,$02,$D6,$9A,$D6,$9A,$A9,$00
-    .byte $85,$CD,$8D,$7C,$4D,$8D,$AC,$4D,$60,$55,$92,$60,$92,$76,$92,$A4
-    .byte $92,$C6,$B9,$A5,$B9,$C9,$0A,$D0,$23,$66,$A9,$60,$A5,$A0,$C9,$01
-    .byte $F0,$0A,$C9,$04,$F0,$06,$A5,$9B,$C9,$06,$90,$02,$C6,$A1,$A5,$B9
-    .byte $10,$0A,$E6,$B9,$A5,$B9,$C9,$14,$D0,$02,$C6,$A1,$18,$65,$CD,$85
-    .byte $D9,$A5,$CC,$85,$D8,$A5,$DA,$29,$02,$F0,$06,$A9,$80,$05,$DA,$D0
-    .byte $04,$A9,$7F,$25,$DA,$85,$DA,$A5,$A3,$C9,$04,$90,$02,$66,$A9,$60
-    .byte $A9,$0A,$85,$B9,$D0,$D4,$B6,$92,$D5,$92,$EE,$92,$12,$93,$3E,$93
-    .byte $68,$93,$AD,$79,$4D,$D0,$03,$8D,$05,$4D,$C9,$09,$D0,$0D,$8D,$05
-    .byte $4D,$66,$A8,$EE,$C9,$4D,$A9,$03,$85,$49,$60,$20,$79,$99,$4C,$F7
-    .byte $86,$A5,$A9,$10,$14,$A9,$00,$8D,$89,$4D,$8D,$0E,$4D,$85,$B0,$85
-    .byte $B8,$C6,$A0,$A9,$02,$85,$E3,$85,$49,$60,$E6,$D7,$A5,$D7,$C9,$D1
-    .byte $90,$1B,$C6,$A0,$A9,$FF,$A6,$A3,$F0,$13,$CA,$F0,$09,$CA,$F0,$03
-    .byte $85,$F7,$60,$85,$F9,$60,$18,$A5,$F6,$69,$03,$85,$F6,$60,$A5,$A9
-    .byte $C9,$04,$D0,$08,$A5,$A1,$C9,$01,$D0,$02,$C6,$A0,$A9,$0A,$18,$65
-    .byte $CD,$85,$D7,$A5,$CC,$85,$D6,$A5,$DA,$29,$02,$F0,$06,$A9,$40,$05
-    .byte $DA,$D0,$04,$A9,$BF,$25,$DA,$85,$DA,$60,$A5,$D7,$E9,$0A,$C5,$CD
-    .byte $90,$06,$C6,$D7,$C6,$D7,$B0,$DB,$A2,$00,$86,$E3,$E8,$86,$49,$38
-    .byte $66,$A8
+    .byte $7B,$93,$80,$86,$64,$64,$8F,$64,$75,$77,$91,$92
+TYPE_TBL_ANIM:
+    .byte $04,$09,$09,$09,$03,$03,$01,$03,$03,$02,$02,$01,$00,$00,$00,$00
+    .byte $00,$01,$00,$01,$01,$05,$03,$02,$02,$00,$01,$01
+TYPE_TBL_VEL:
+    .byte $D6,$DA,$DA,$DA,$00,$00,$00,$FC,$00,$73,$00,$00,$AB,$CA,$CA,$BF
+    .byte $DD,$00,$CD,$B9,$00,$00,$00,$00,$C6,$00,$00,$00
+DRAW_TBL_T07:
+    .word DRAW_T07_F0
+    .word DRAW_T07_F1
+    .word DRAW_T07_F2
+    .word DRAW_T07_F3
+DRAW_T07_TAIL_TBL:
+    .byte $00,$04,$01
+L8F43:
+    sec
+    ror HERO_STATE
+    lda #$00
+    sta FLAG_FF
+    rts
+L8F4B:
+    jsr RNG_NEXT
+    and #$3F
+    sta STATE_4D5C
+    lda #$01
+    sta FLAG_FF
+    rts
+DRAW_T07_F0:
+    ldy #$1C
+    jsr SOUND_REQ_V0B
+    lda SPAWN_Y
+    cmp #$09
+    bcc L8F43
+    jmp L8FE9
+L8F66:
+    dec STATE_9B
+    lda #$00
+    sta $AB
+    lda #$02
+    sta STATE_4D54
+    lda FLAG_FF
+    pha
+    lda #$FF
+    sta FLAG_FF
+    pla
+    bpl L8F83
+    lda #$01
+    sta STATE_4D5C
+    jsr ATTRACT_HELPER
+L8F83:
+    rts
+DRAW_T07_F1:
+    lda STATE_4DAC
+    bne L8F66
+    lda FLAG_FF
+    bpl L8F90
+    jmp L8FFD
+L8F90:
+    bne L8F95
+    jsr L8F4B
+L8F95:
+    lda $C6
+    asl
+    php
+    cmp #$02
+    bcc L8FBA
+    plp
+    bcc L8FAC
+    lda STATE_4D44
+    beq L8FA8
+    dec STATE_4D44
+L8FA8:
+    lda #$FF
+    bne L8FBD
+L8FAC:
+    lda STATE_4D44
+    cmp #$02
+    bcs L8FB6
+    inc STATE_4D44
+L8FB6:
+    lda #$01
+    bne L8FBD
+L8FBA:
+    plp
+    lda #$00
+L8FBD:
+    sta $AB
+    lda SPEED_SUM
+    sec
+    sbc #$3C
+    sbc SPAWN_Y
+    beq L8FF9
+    bcs L8FCD
+    lda #$FF
+    .byte $2C
+L8FCD:
+    .byte $A9,$01
+L8FCF:
+    sta STATE_4D54
+    ldy STATE_4D44
+    lda DRAW_T07_TAIL_TBL,y
+    sta STATE_4D34
+    lda VIC_SPR_YEXP
+    dey
+    bne L8FE4
+    ora BIT_MASK
+    .byte $2C
+L8FE4:
+    .byte $25,$10
+    sta VIC_SPR_YEXP
+L8FE9:
+    lda STATE_4D54
+L8FEC:
+    pha
+    jsr DRAW_DISPATCH_99D8
+    pla
+    jsr L98FB
+    ldx OBJ_IDX
+    jmp ATTRACT_HELPER
+L8FF9:
+    lda #$00
+    beq L8FCF
+L8FFD:
+    lda #$00
+    sta $AB
+    jmp L8FEC
+DRAW_T07_F2:
+    lda $C7
+    bmi L8FE9
+    dec STATE_9B
+    jmp L8F4B
+DRAW_T07_F3:
+    dec STATE_9B
+    dec $AB
+    lda #$FA
+    sta SPAWN_Y
+    lda BIT_MASK
+    ora SPR_XMSB
+    sta SPR_XMSB
+    lda #$20
+    sta $CC
+    jsr SOUND_SILENCE
+    ldy #$1A
+    jmp SOUND_REQ_V0B
+DRAW_TBL_T08:
+    .word DRAW_T08_F0
+    .word DRAW_T08_F1
+    .word DRAW_T08_F2
+    .word DRAW_T08_F3
+DRAW_T08_F0:
+    lda #$04
+    sta OBJ_ANIM
+    lda #$01
+    jsr L9076
+    sbc #$0C
+    jsr L9096
+    jmp L9064
+DRAW_T08_F1:
+    lda #$00
+    jsr L9076
+    jsr L9096
+    jmp L9064
+DRAW_T08_F2:
+    lda #$02
+    jsr L9076
+    jsr L9096
+    sbc #$15
+    jmp L9064
+DRAW_T08_F3:
+    lda #$03
+    jsr L9076
+    sbc #$0C
+    jsr L9096
+    sbc #$15
+L9064:
+    sta SPR_Y_SHADOW
+    ldx OBJ_IDX
+    dec OBJ_ANIM
+    jsr DRAW_DISPATCH_99D8
+    lda VIC_SPR_ENA
+    ora #$01
+    sta VIC_SPR_ENA
+    rts
+L9076:
+    sta OBJ_TBL33
+    lda VIC_SPR_ENA
+    and #$FE
+    sta VIC_SPR_ENA
+    lda SPR_XMSB
+    lsr
+    lsr
+    lda $CC
+    ror
+    rol ZTMP_08
+    ldx STATE_4D44
+    clc
+    adc DRAW_T00_F3_TBL,x
+    sec
+    rts
+DRAW_T00_F3_TBL:
+    .byte $03,$05,$08
+L9096:
+    ror ZTMP_08
+    rol
+    php
+    sta SPR_X_SHADOW
+    lda SPR_XMSB
+    lsr
+    plp
+    rol
+    sta SPR_XMSB
+    lda #$07
+    clc
+    adc SPAWN_Y
+    sec
+    rts
+DRAW_TBL_T00:
+    .word DRAW_T00_F0
+    .word DRAW_T00_F1
+    .word DRAW_T00_F2
+    .word DRAW_T00_F3
+    .word DRAW_T00_F4
+    .word DRAW_T00_F5
+    .word DRAW_T00_F6
+    .word DRAW_T00_F7
+    .word DRAW_T00_F8
+    .word DRAW_T00_F9
+DRAW_T00_F0:
+    stx STATE_4DAC
+    jmp L91DC
+L90C4:
+    dec STATE_9B
+L90C6:
+    jmp DRAW_TIMER_GATE
+DRAW_T00_F1:
+    ldx #$FF
+    stx $B3
+    lda STATE_4D74
+    bne L90D8
+    dec STATE_9B
+    inc STATE_4D54
+    inx
+L90D8:
+    stx $AB
+    jmp L9119
+DRAW_T00_F2:
+    lda FLAG_A1
+    bne L90C6
+    beq L90C4
+DRAW_T00_F3:
+    lda #$00
+    cmp STATE_4D64
+    bne L90F4
+    cmp STATE_4D74
+    bne L90F4
+    cmp STATE_4D6C
+    beq DRAW_T00_F4
+L90F4:
+    jsr SPEED_SET
+    lda #$01
+    sta $B3
+    lda SPAWN_Y
+    cmp #$A0
+    beq L90C4
+    ldx #$00
+    lda STATE_4D64
+    beq L9116
+    cmp #$03
+    beq L9117
+    cmp #$04
+    beq L9117
+    cmp #$05
+    beq L9117
+    dex
+    dex
+L9116:
+    inx
+L9117:
+    stx $AB
+L9119:
+    ldx OBJ_IDX
+    jsr DRAW_TIMER_GATE
+    jmp DRAW_T0A_F0
+DRAW_T00_F4:
+    lda SCROLL_SPEED
+    beq L913D
+    cmp #$01
+    beq L9142
+    dec STATE_4D08
+    ldy #$0F
+    jsr SPEED_STEP_DOWN
+    lda #$00
+    sec
+    sbc ROAD_X_REF
+    sta $B3
+    dec $B3
+    jmp L91DC
+L913D:
+    lda #$01
+    jsr SPEED_SET
+L9142:
+    lda #$FD
+    sta $B3
+    lda #$01
+    sta $AB
+    ldx STATE_4D64
+    beq L9119
+    ldx STATE_4D74
+    beq L9119
+    lda #$00
+    sta $AB
+    ldx SPAWN_Y
+    cpx #$90
+    bcs L9119
+    sta $B3
+    dec STATE_9B
+    bpl L9119
+DRAW_T00_F5:
+    lda BIT_MASK_INV
+    sta HIT_GROUP1
+    lda SPEED_ACCUM
+    sta STATE_4D54
+    lda $C7
+    bmi L9182
+    cmp #$32
+    bcs L9182
+    cmp #$1E
+    bcc L9186
+    lda $C6
+    and #$7F
+    cmp #$01
+    bcc L9192
+L9182:
+    inc STATE_9B
+    bne L918F
+L9186:
+    dec STATE_9B
+    lda #$04
+    sta $A0
+    sta STATE_4D05
+L918F:
+    inc STATE_4D07
+L9192:
+    dec STATE_4D08
+    lda SPAWN_Y
+    cmp #$65
+    bcs L91A8
+    sec
+    lda #$00
+    sbc ROAD_X_REF
+    bpl L91A8
+    cmp #$F8
+    beq L91A8
+    sta $B3
+L91A8:
+    jmp L91DC
+DRAW_T00_F6:
+    lda $C7
+    bmi L91CB
+    cmp #$31
+    bcs L918F
+    cmp #$27
+    bcc L91D4
+    lda $C6
+    and #$7F
+    cmp #$01
+    bcs L918F
+    sec
+    ror ANIM_STATE
+    inc STATE_4D54
+    inc $B3
+    dec STATE_9B
+    bne L918F
+L91CB:
+    and #$7F
+    cmp #$35
+    bcc L91D4
+    inc STATE_4D07
+L91D4:
+    ldx SPEED_ACCUM
+    dex
+    stx STATE_4D54
+    ldx OBJ_IDX
+L91DC:
+    jsr DRAW_TIMER_GATE
+    jmp L97F3
+DRAW_T00_F7:
+    lda #$58
+    sta FLAG_FB
+    sta $CC
+    lda #$FD
+    and SPR_XMSB
+    sta SPR_XMSB
+    lda SPAWN_Y
+    cmp #$F0
+    lda #$00
+    bcc L91FA
+    dec STATE_9B
+    sta FLAG_FB
+L91FA:
+    dec STATE_4D5C
+    bne L9201
+    sta STATE_9B
+L9201:
+    jmp DRAW_TIMER_GATE
+DRAW_T00_F8:
+    lda #$DC
+    sta FLAG_FB
+    sta $CC
+    lda #$FD
+    and SPR_XMSB
+    sta SPR_XMSB
+    lda SPAWN_Y
+    cmp #$10
+    bcs L921B
+    clc
+    adc #$0C
+    sta SPAWN_Y
+L921B:
+    lda SEQ_STATE
+    cmp #$03
+    bne L922E
+    lda #$04
+    sta STATE_9B
+    ldx #$00
+    stx FLAG_FB
+L9229:
+    ldx OBJ_IDX
+    jmp DRAW_TIMER_GATE
+L922E:
+    lda $D003
+    cmp #$F0
+    bcc L9229
+    ror HERO_STATE
+    rts
+DRAW_T00_F9:
+    lda #$15
+    cmp PREV_FEATURE
+    beq L9240
+    dec OBJ_ANIM,x
+L9240:
+    dec OBJ_ANIM,x
+    lda #$00
+    sta SPAWN_Y
+    sta STATE_4D7C
+    sta STATE_4DAC
+    rts
+DRAW_TBL_T04:
+    .word DRAW_T04_F0
+    .word DRAW_T04_F1
+    .word DRAW_T04_F2
+    .word DRAW_T04_F3
+DRAW_T04_F0:
+    dec $B9
+    lda $B9
+    cmp #$0A
+    bne L9280
+    ror ANIM_STATE
+    rts
+DRAW_T04_F1:
+    lda $A0
+    cmp #$01
+    beq L9270
+    cmp #$04
+    beq L9270
+    lda STATE_9B
+    cmp #$06
+    bcc L9272
+L9270:
+    dec FLAG_A1
+L9272:
+    lda $B9
+    bpl L9280
+DRAW_T04_F2:
+    inc $B9
+    lda $B9
+    cmp #$14
+    bne L9280
+L927E:
+    dec FLAG_A1
+L9280:
+    clc
+    adc SPAWN_Y
+    sta $D9
+    lda $CC
+    sta $D8
+    lda SPR_XMSB
+    and #$02
+    beq L9295
+    lda #$80
+    ora SPR_XMSB
+    bne L9299
+L9295:
+    lda #$7F
+    and SPR_XMSB
+L9299:
+    sta SPR_XMSB
+    lda HERO_STATE
+    cmp #$04
+    bcc L92A3
+    ror ANIM_STATE
+L92A3:
+    rts
+DRAW_T04_F3:
+    lda #$0A
+    sta $B9
+    bne L927E
+DRAW_TBL_T05:
+    .word DRAW_T05_F0
+    .word DRAW_T05_F1
+    .word DRAW_T05_F2
+    .word DRAW_T05_F3
+    .word DRAW_T05_F4
+    .word DRAW_STATE_4D89_PREP
+DRAW_T05_F0:
+    lda OBJ_TBL79
+    bne L92BE
+    sta STATE_4D05
+L92BE:
+    cmp #$09
+    bne L92CF
+    sta STATE_4D05
+    ror SCENE_ID
+    inc STATE_4DC9
+    lda #$03
+    sta SEQ_STATE
+    rts
+L92CF:
+    jsr $9979
+    jmp $86F7
+DRAW_T05_F1:
+    lda ANIM_STATE
+    bpl L92ED
+    lda #$00
+    sta STATE_4D89
+    sta STATE_4D0E
+    sta STEER_ACCUM
+    sta SPEED_ACCUM
+    dec $A0
+    lda #$02
+    sta TIMER_ENABLE
+    sta SEQ_STATE
+L92ED:
+    rts
+DRAW_T05_F2:
+    inc SPEED_SUM
+    lda SPEED_SUM
+    cmp #$D1
+    bcc L9311
+    dec $A0
+    lda #$FF
+    ldx HERO_STATE
+    beq L9311
+    dex
+    beq L930A
+    dex
+    beq L9307
+    sta MISSILE_CNT
+    rts
+L9307:
+    sta SMOKE_CNT
+    rts
+L930A:
+    clc
+    lda GUN_HEAT
+    adc #$03
+    sta GUN_HEAT
+L9311:
+    rts
+DRAW_T05_F3:
+    lda ANIM_STATE
+    cmp #$04
+    bne L9320
+    lda FLAG_A1
+    cmp #$01
+    bne L9320
+    dec $A0
+L9320:
+    lda #$0A
+DRAW_ENTRY_9322:
+    clc
+    adc SPAWN_Y
+    sta SPEED_SUM
+L9327:
+    lda $CC
+    sta STEER_SUM
+    lda SPR_XMSB
+    and #$02
+    beq L9337
+    lda #$40
+    ora SPR_XMSB
+    bne L933B
+L9337:
+    lda #$BF
+    and SPR_XMSB
+L933B:
+    sta SPR_XMSB
+    rts
+DRAW_T05_F4:
+    lda SPEED_SUM
+    sbc #$0A
+    cmp SPAWN_Y
+    bcc L934C
+    dec SPEED_SUM
+    dec SPEED_SUM
+    bcs L9327
+L934C:
+    ldx #$00
+    stx TIMER_ENABLE
+    inx
+    stx SEQ_STATE
+    sec
+    ror SCENE_ID
 
-; -----------------------------------------------------------------------
-; Start the 3-voice "Peter Gunn" theme: silence everything, then request
-; sound-effect index $02 on voice 1, $04 on the "voice 0B" queue, and $06 on
-; voice 2 - three simultaneous SOUND_REQ_* calls kick off the three SID
-; voices' independent note sequences (see MUSIC_DRIVER further down for how
-; a queued request turns into actual SID register writes).
 MUSIC_START_THEME:
     jsr SOUND_SILENCE
     ldy #$02
@@ -3326,119 +3894,993 @@ MUSIC_START_THEME:
     ldy #$06
     jmp SOUND_REQ_V2
 ; -----------------------------------------------------------------------
-; More per-object-type/hero state-machine handler CODE stored as raw data -
-; the same situation as the two blocks noted in Stage 5 (PROCESS_OBJECTS/
-; INIT_OBJECT_SLOT): only reachable indirectly via the ZVEC_MOVE/ZVEC_DRAW/
-; VEC_STATE dispatch vectors, so a straight-line disassembly never picks it
-; up as code. This is the largest such block in the file (~1650 bytes) -
-; left unexpanded for a future focused session, same as its counterparts.
-    .byte $A5,$D7,$C9,$23,$90,$04,$C9,$DC,$90,$03,$EE,$89,$4D,$A5,$33,$4A
-    .byte $90,$1D,$A9,$07,$CE,$0E,$4D,$10,$03,$8D,$0E,$4D,$A4,$B0,$10,$04
-    .byte $AD,$0E,$4D,$0A,$38,$ED,$0E,$4D,$A8,$B9,$9A,$93,$20,$DB,$99,$4C
-    .byte $00,$99,$00,$09,$05,$0B,$02,$0A,$04,$08,$A8,$93,$08,$94,$43,$94
-    .byte $AD,$79,$4D,$C9,$09,$D0,$0D,$E6,$A0,$EE,$C9,$4D,$8D,$05,$4D,$A9
-    .byte $03,$85,$49,$60,$A9,$15,$C5,$44,$F0,$0A,$C5,$45,$D0,$3C,$A5,$44
-    .byte $C9,$0F,$D0,$36,$AD,$B9,$4D,$C9,$13,$90,$2F,$8D,$05,$4D,$A0,$00
-    .byte $8C,$61,$4D,$C9,$19,$F0,$05,$90,$02,$88,$88,$C8,$8C,$0A,$4D,$A4
-    .byte $A3,$C9,$07,$D0,$05,$8C,$AC,$4D,$E6,$CD,$A0,$00,$A5,$34,$C9,$02
-    .byte $F0,$05,$90,$02,$88,$88,$C8,$8C,$09,$4D,$20,$8F,$99,$4C,$F7,$86
-    .byte $A5,$49,$C9,$05,$F0,$33,$A5,$35,$49,$FF,$18,$69,$01,$85,$B8,$AD
-    .byte $79,$4D,$D0,$0A,$38,$66,$A8,$A9,$01,$85,$49,$4C,$02,$94,$C9,$02
-    .byte $D0,$D8,$C6,$A0,$A9,$04,$85,$49,$4A,$8D,$81,$4D,$A9,$00,$8D,$CB
-    .byte $4D,$8D,$89,$4D,$8D,$05,$4D,$F0,$C1,$E6,$A0,$A9,$22,$4C,$22,$93
-    .byte $4E,$94,$56,$94,$71,$94,$A9,$01,$8D,$AC,$4D,$4C,$F3,$97,$EE,$08
-    .byte $4D,$A5,$C7,$30,$11,$C9,$04,$B0,$0D,$A9,$00,$38,$E5,$35,$95,$B2
-    .byte $CE,$08,$4D,$CE,$08,$4D,$4C,$F3,$97,$C6,$9B,$A2,$01,$86,$B3,$60
-    .byte $00,$99,$82,$94,$7E,$94,$C6,$9A,$D0,$11,$20,$B1,$94,$A5,$B3,$85
-    .byte $B2,$A5,$C7,$10,$06,$29,$7F,$C9,$28,$90,$26,$A9,$06,$8D,$27,$D0
-    .byte $A5,$DA,$4A,$4A,$08,$2A,$28,$2A,$85,$DA,$A5,$CC,$18,$69,$04,$85
-    .byte $CA,$90,$06,$A5,$05,$05,$DA,$85,$DA,$A5,$CD,$18,$69,$0F,$85,$CB
-    .byte $60,$C9,$14,$B0,$0D,$A0,$0C,$20,$82,$AA,$C6,$9A,$A5,$A8,$10,$02
-    .byte $C6,$9B,$A9,$0A,$8D,$27,$D0,$A5,$C6,$10,$14,$A9,$F6,$85,$AA,$A5
-    .byte $CC,$38,$E9,$02,$85,$CA,$B0,$1A,$A5,$DA,$4A,$0A,$85,$DA,$60,$A9
-    .byte $0A,$85,$AA,$A5,$CC,$18,$69,$0A,$85,$CA,$90,$06,$A5,$DA,$05,$05
-    .byte $85,$DA,$60,$15,$95,$24,$95,$03,$95,$24,$95,$A9,$FB,$48,$A5,$BC
-    .byte $30,$03,$A9,$02,$2C,$A9,$FE,$85,$B1,$A9,$78,$D0,$05,$A9,$ED,$48
-    .byte $A9,$50,$C5,$D9,$90,$02,$66,$A9,$68,$4C,$FB,$98,$C6,$A1,$A5,$B0
-    .byte $85,$B1,$A5,$DA,$0A,$0A,$08,$6A,$28,$6A,$85,$DA,$A5,$D6,$85,$D8
-    .byte $A5,$D7,$85,$D9,$A0,$10,$A5,$A9,$C9,$0B,$F0,$02,$A0,$22,$4C,$8A
-    .byte $AA,$4B,$95,$A5,$C7,$30,$12,$C9,$0F,$B0,$0B,$FE,$AB,$4D,$AD,$05
-    .byte $4D,$D0,$03,$EE,$07,$4D,$EE,$08,$4D,$B5,$A2,$C9,$0D,$D0,$03,$20
-    .byte $B6,$99,$4C,$F3,$97,$73,$95,$83,$95,$B5,$95,$A5,$C7,$29,$7F,$C9
-    .byte $14,$B0,$05,$A9,$01,$9D,$AB,$4D,$4C,$F3,$97,$DE,$5B,$4D,$D0,$03
-    .byte $FE,$83,$4D,$A5,$33,$4A,$4A,$29,$03,$A8,$B9,$AD,$95,$DD,$33,$4D
-    .byte $F0,$0F,$20,$D5,$99,$B9,$B1,$95,$A4,$07,$18,$79,$CA,$00,$99,$CA
-    .byte $00,$A4,$07,$10,$C6,$01,$00,$02,$00,$F8,$08,$06,$FA,$D6,$9A,$A9
-    .byte $3C,$9D,$5B,$4D,$D0,$C5,$C2,$95,$D3,$95,$AD,$21,$4D,$25,$10,$8D
-    .byte $21,$4D,$A9,$00,$CE,$5C,$4D,$D0,$17,$F0,$12,$A5,$FC,$D0,$0E,$A9
-    .byte $0F,$8D,$5C,$4D,$A5,$CD,$C9,$F3,$8A,$85,$FB,$90,$03,$38,$66,$A3
-    .byte $4C,$DB,$99,$EF,$95,$FC,$95,$A5,$C7,$30,$03,$EE,$07,$4D,$20,$E3
-    .byte $99,$4C,$FB,$97,$AD,$05,$4D,$D0,$EE,$BD,$5B,$4D,$30,$05,$FE,$5B
-    .byte $4D,$10,$E4,$A5,$C7,$30,$E7,$A5,$C6,$29,$7F,$C9,$0F,$B0,$D8,$20
-    .byte $C6,$A2,$A9,$26,$9D,$5B,$4D,$9D,$AB,$4D,$10,$CB,$2A,$96,$48,$96
-    .byte $51,$96,$DE,$5B,$4D,$D0,$03,$38,$76,$A2,$A5,$33,$29,$03,$48,$20
-    .byte $DB,$99,$68,$D0,$08,$F6,$B2,$30,$04,$F0,$02,$D6,$B2,$4C,$00,$99
-    .byte $A9,$1E,$9D,$5B,$4D,$D6,$9A,$10,$E1,$A9,$01,$20,$06,$A1,$A9,$FE
-    .byte $95,$B2,$A5,$D7,$85,$D9,$A5,$D6,$85,$D8,$A5,$DA,$0A,$38,$30,$01
-    .byte $18,$6A,$85,$DA,$D6,$9A,$60,$7B,$96,$83,$96,$9E,$96,$B5,$96,$D9
-    .byte $96,$5A,$96,$A9,$01,$9D,$AB,$4D,$4C,$00,$99,$DE,$5B,$4D,$BD,$5B
-    .byte $4D,$29,$07,$F0,$01,$60,$D6,$9A,$B9,$CB,$00,$18,$69,$05,$99,$CB
-    .byte $00,$A9,$8B,$4C,$DF,$99,$DE,$5B,$4D,$BD,$5B,$4D,$29,$07,$F0,$01
-    .byte $60,$D6,$9A,$A9,$04,$9D,$27,$D0,$A9,$8A,$4C,$DF,$99,$DE,$5B,$4D
-    .byte $BD,$5B,$4D,$29,$07,$D0,$0C,$A9,$01,$20,$06,$A1,$D6,$9A,$A9,$89
-    .byte $4C,$DF,$99,$29,$03,$D0,$07,$A0,$07,$20,$EE,$A0,$A9,$00,$4C,$DB
-    .byte $99,$20,$A8,$AA,$A0,$1E,$20,$8A,$AA,$A4,$07,$A9,$2F,$9D,$5B,$4D
-    .byte $D6,$9A,$10,$E3,$F4,$96,$FE,$96,$15,$97,$5A,$96,$DE,$5B,$4D,$D0
-    .byte $14,$38,$76,$A2,$D0,$14,$DE,$5B,$4D,$D0,$0A,$A9,$1E,$9D,$5B,$4D
-    .byte $D6,$9A,$DE,$2B,$4D,$A9,$01,$20,$06,$A1,$4C,$00,$99,$A9,$1E,$9D
-    .byte $5B,$4D,$D6,$9A,$10,$E0,$24,$97,$4E,$97,$38,$97,$A5,$44,$C9,$15
-    .byte $D0,$07,$CE,$08,$4D,$A9,$01,$85,$B3,$A9,$01,$8D,$AC,$4D,$D0,$29
-    .byte $A9,$F4,$85,$D7,$A9,$01,$20,$06,$A1,$EE,$5C,$4D,$30,$01,$60,$A0
-    .byte $20,$20,$7A,$AA,$C6,$9B,$A5,$CD,$C9,$A0,$B0,$09,$C6,$9B,$A9,$04
-    .byte $85,$49,$A9,$01,$2C,$A9,$02,$85,$A0,$20,$EB,$99,$A9,$00,$85,$AB
-    .byte $4C,$FB,$97,$6F,$97,$8E,$97,$A5,$DA,$4A,$48,$4A,$A5,$CC,$6A,$08
-    .byte $18,$69,$04,$28,$2A,$85,$CA,$68,$2A,$85,$DA,$E6,$9A,$A9,$06,$85
-    .byte $B2,$A9,$14,$8D,$5B,$4D,$E6,$B2,$CE,$5B,$4D,$D0,$02,$C6,$9A,$18
-    .byte $A5,$CD,$65,$B2,$85,$CB,$A5,$A3,$C9,$18,$F0,$03,$38,$66,$A2,$60
-    .byte $AC,$97,$BF,$97,$AD,$21,$4D,$09,$01,$8D,$21,$4D,$A9,$01,$8D,$AB
-    .byte $4D,$8D,$AE,$4D,$4C,$00,$99,$A5,$DA,$29,$08,$18,$F0,$01,$38,$08
-    .byte $A5,$DA,$4A,$28,$2A,$A5,$D0,$18,$69,$08,$85,$CA,$A5,$D1,$18,$69
-    .byte $05,$85,$CB,$A5,$C7,$10,$13,$A9,$FA,$85,$B2,$A5,$C6,$29,$7F,$C9
-    .byte $04,$B0,$07,$C6,$9A,$A0,$2A,$20,$82,$AA,$60,$A5,$44,$C9,$03,$D0
-    .byte $02,$F6,$B2,$A0,$0C,$B5,$A2,$C9,$04,$B0,$02,$A0,$0E,$84,$09,$A0
-    .byte $00,$84,$08,$84,$0B,$C8,$D0,$01,$28,$C8,$C4,$09,$F0,$26,$C4,$07
-    .byte $D0,$03,$C8,$D0,$F4,$B9,$BA,$00,$C8,$0A,$08,$4A,$C9,$15,$B0,$E8
-    .byte $46,$0B,$28,$26,$0B,$B9,$BA,$00,$0A,$08,$4A,$C9,$23,$B0,$D9,$28
-    .byte $90,$D7,$26,$08,$A4,$07,$AD,$07,$4D,$D0,$08,$A5,$33,$4A,$90,$03
-    .byte $4C,$00,$99,$BD,$8B,$4D,$F0,$09,$B5,$AA,$D0,$02,$F6,$AA,$4C,$00
-    .byte $99,$A5,$08,$F0,$43,$A5,$0B,$F0,$18,$BD,$6B,$4D,$DD,$7B,$4D,$D0
-    .byte $26,$B5,$AA,$30,$07,$DD,$43,$4D,$F0,$04,$B0,$16,$F6,$AA,$4C,$00
-    .byte $99,$BD,$63,$4D,$DD,$7B,$4D,$D0,$0E,$B5,$AA,$DD,$3B,$4D,$F0,$04
-    .byte $30,$EA,$D6,$AA,$4C,$00,$99,$B5,$B2,$DD,$4B,$4D,$10,$02,$F6,$B2
-    .byte $B5,$AA,$F0,$64,$30,$D6,$10,$EA,$AD,$08,$4D,$30,$1A,$18,$F0,$01
-    .byte $38,$A5,$33,$29,$07,$D0,$10,$B0,$2B,$B5,$B2,$DD,$53,$4D,$30,$05
-    .byte $D6,$B2,$4C,$BF,$98,$F6,$B2,$BD,$63,$4D,$DD,$7B,$4D,$D0,$A2,$BD
-    .byte $6B,$4D,$DD,$7B,$4D,$D0,$B2,$AD,$07,$4D,$F0,$C4,$A5,$C6,$F0,$C0
-    .byte $10,$8F,$30,$A5,$A5,$C7,$F0,$DF,$30,$CF,$C9,$05,$90,$D9,$A9,$00
-    .byte $38,$E5,$35,$D5,$B2,$30,$D0,$B5,$B2,$DD,$4B,$4D,$10,$C9,$F6,$B2
-    .byte $4C,$BF,$98,$38,$E5,$35,$95,$B2,$A6,$06,$A4,$07,$B5,$AA,$08,$18
-    .byte $79,$CA,$00,$99,$CA,$00,$B0,$05,$28,$30,$05,$10,$09,$28,$30,$06
-    .byte $A5,$05,$45,$DA,$85,$DA,$BD,$73,$4D,$10,$03,$38,$76,$A2,$B5,$B2
-    .byte $48,$B9,$CB,$00,$AA,$68,$18,$79,$CB,$00,$18,$65,$35,$E0,$0C,$90
-    .byte $0D,$E0,$F3,$90,$10,$C9,$E9,$20,$51,$99,$90,$0C,$B0,$07,$C9,$16
-    .byte $20,$51,$99,$B0,$03,$99,$CB,$00,$60,$08,$48,$A6,$06,$BD,$AB,$4D
-    .byte $F0,$08,$A9,$00,$9D,$AB,$4D,$38,$76,$A2,$68,$28,$60,$A5,$33,$29
-    .byte $03,$F0,$01,$60,$A5,$9B,$C9,$02,$A9,$04,$90,$18,$4D,$34,$4D,$10
-    .byte $13,$A5,$34,$F0,$0F,$AD,$79,$4D,$F0,$0A,$A0,$0E,$20,$86,$AA,$AD
-    .byte $39,$4D,$49,$01,$4C,$D5,$99,$A5,$A0,$F0,$04,$A9,$95,$D0,$48,$38
-    .byte $A9,$04,$E5,$34,$A8,$A9,$00,$88,$30,$04,$38,$2A,$D0,$F9,$25,$33
-    .byte $D0,$2E,$CE,$39,$4D,$10,$29,$A9,$02,$8D,$39,$4D,$10,$22,$A4,$07
-    .byte $A5,$49,$C9,$02,$90,$15,$A5,$C7,$29,$7F,$C9,$1E,$B0,$0D,$A0,$18
-    .byte $20,$76,$AA,$DE,$33,$4D,$10,$08,$A9,$02,$2C,$A9,$00,$9D,$33,$4D
-    .byte $BD,$33,$4D,$18,$7D,$23,$4D
+; Per-object DRAW handlers for enemy/effect OBJ_TYPEs $06/$09-$1B (dispatched
+; via OBJINIT_PARAM_TBL's draw-vector column -> ZVEC_DRAW -> OBJ_VEC2_DISPATCH,
+; Stage 5). This was the largest remaining raw-data block in the file
+; (~1650 bytes). Each TYPE's draw entry points at a small per-animation-frame
+; address table (DRAW_TBL_T*, indexed by OBJ_ANIM*2 through the two-stage
+; ZVEC_DRAW indirection documented at PROCESS_OBJECTS) rather than at code
+; directly - several tables/frame routines are shared between adjacent TYPE
+; values (e.g. DRAW_TBL_T0E covers TYPE $0E/$0F/$10; DRAW_TBL_T14 covers
+; TYPE $14/$17). TYPE $12/$13 (DRAW_TBL_T12) is the confirmed boat/water
+; enemy pair; TYPE $1B (DRAW_TBL_T1B) is the confirmed live-bullet type from
+; claude/Collision_Detection_Notes.md - both draw tables live here.
+;
+; DRAW_STATE_4D89_PREP ($9368, the block's first bytes) is NOT one of
+; OBJINIT_PARAM_TBL's dispatch targets - nothing in the ROM JSR/JMPs to it
+; directly, so it's reached some other way (candidate: the panel/HUD's own
+; speed or boat-wake indicator, since it reads SPEED_SUM/STEER_ACCUM - not
+; confirmed). It falls through into DRAW_T0A_F0.
+;
+; Individual TYPE semantics (which enemy/effect each one draws) are not
+; interpreted here - deep semantic identification of enemy OBJ_TYPEs is
+; tracked separately (claude/*.md, the open "pin down remaining enemy
+; OBJ_TYPE values" item). Three "BIT-absolute/zp as a 2-byte skip" overlap
+; tricks (same idiom as SPEED_STEP_DOWN/UP and MOVE_BOAT_SEQ_LO/ARM) are kept
+; as raw bytes with labels at each entry point.
+DRAW_STATE_4D89_PREP:
+    lda SPEED_SUM
+    cmp #$23
+    bcc L9372
+    cmp #$DC
+    bcc L9375
+L9372:
+    inc STATE_4D89
+L9375:
+    lda FRAME_CTR
+    lsr
+    bcc L9397
+    lda #$07
+    dec STATE_4D0E
+    bpl L9384
+    sta STATE_4D0E
+L9384:
+    ldy STEER_ACCUM
+    bpl L938C
+    lda STATE_4D0E
+    asl
+L938C:
+    sec
+    sbc STATE_4D0E
+    tay
+    lda DRAW_STATE_4D89_PREP_TBL,y
+    jsr COMMIT_SPRITE_OFS
+L9397:
+    jmp DRAW_T0A_F0
+DRAW_STATE_4D89_PREP_TBL:
+    .byte $00,$09,$05,$0B,$02,$0A,$04,$08
+DRAW_TBL_T06:
+    .word DRAW_T06_F0
+    .word DRAW_T06_F1
+    .word DRAW_T06_F2
+DRAW_T06_F0:
+    lda OBJ_TBL79
+    cmp #$09
+    bne L93BC
+    inc $A0
+    inc STATE_4DC9
+    sta STATE_4D05
+    lda #$03
+    sta SEQ_STATE
+    rts
+L93BC:
+    lda #$15
+    cmp ROAD_FEATURE
+    beq L93CC
+    cmp PREV_FEATURE
+    bne L9402
+    lda ROAD_FEATURE
+    cmp #$0F
+    bne L9402
+L93CC:
+    lda STATE_4DB9
+    cmp #$13
+    bcc L9402
+    sta STATE_4D05
+    ldy #$00
+    sty STATE_4D61
+    cmp #$19
+    beq L93E4
+    bcc L93E3
+    dey
+    dey
+L93E3:
+    iny
+L93E4:
+    sty STATE_4D0A
+    ldy HERO_STATE
+    cmp #$07
+    bne L93F2
+    sty STATE_4DAC
+    inc SPAWN_Y
+L93F2:
+    ldy #$00
+    lda SCROLL_SPEED
+    cmp #$02
+    beq L93FF
+    bcc L93FE
+    dey
+    dey
+L93FE:
+    iny
+L93FF:
+    sty JOY_STATE
+L9402:
+    jsr L998F
+    jmp $86F7
+DRAW_T06_F1:
+    lda SEQ_STATE
+    cmp #$05
+    beq L9441
+    lda ROAD_X_REF
+    eor #$FF
+    clc
+    adc #$01
+    sta SPEED_ACCUM
+    lda OBJ_TBL79
+    bne L9426
+    sec
+    ror SCENE_ID
+    lda #$01
+    sta SEQ_STATE
+    jmp L9402
+L9426:
+    cmp #$02
+    bne L9402
+    dec $A0
+    lda #$04
+    sta SEQ_STATE
+    lsr
+    sta STATE_4D81
+    lda #$00
+    sta STATE_4DCB
+    sta STATE_4D89
+    sta STATE_4D05
+    beq L9402
+L9441:
+    inc $A0
+DRAW_T06_F2:
+    lda #$22
+    jmp $9322
+DRAW_TBL_T09:
+    .word DRAW_T09_F0
+    .word DRAW_T09_F1
+    .word DRAW_T09_F2
+DRAW_T09_F0:
+    lda #$01
+    sta STATE_4DAC
+    jmp L97F3
+DRAW_T09_F1:
+    inc STATE_4D08
+    lda $C7
+    bmi L946E
+    cmp #$04
+    bcs L946E
+    lda #$00
+    sec
+    sbc ROAD_X_REF
+    sta OBJ_POS_Y,x
+    dec STATE_4D08
+    dec STATE_4D08
+L946E:
+    jmp L97F3
+DRAW_T09_F2:
+    dec STATE_9B
+    ldx #$01
+    stx $B3
+    rts
+DRAW_TBL_T0A:
+    .word DRAW_T0A_F0
+    .word DRAW_T0A_F1
+    .word DRAW_T0A_F2
+DRAW_T0A_F2:
+    dec OBJ_ANIM
+    bne L9493
+DRAW_T0A_F1:
+    jsr L94B1
+    lda $B3
+    sta OBJ_POS_Y
+    lda $C7
+    bpl L9493
+    and #$7F
+    cmp #$28
+    bcc L94B9
+L9493:
+    lda #$06
+    sta VIC_SPR_COLOR
+    lda SPR_XMSB
+    lsr
+    lsr
+    php
+    rol
+    plp
+    rol
+    sta SPR_XMSB
+    lda $CC
+    clc
+    adc #$04
+    sta SPR_X_SHADOW
+    bcc L94B1
+    lda BIT_MASK
+    ora SPR_XMSB
+    sta SPR_XMSB
+L94B1:
+    lda SPAWN_Y
+    clc
+    adc #$0F
+    sta SPR_Y_SHADOW
+    rts
+L94B9:
+    cmp #$14
+    bcs L94CA
+    ldy #$0C
+    jsr SOUND_REQ_V1
+    dec OBJ_ANIM
+    lda SCENE_ID
+    bpl L94CA
+    dec STATE_9B
+L94CA:
+    lda #$0A
+    sta VIC_SPR_COLOR
+    lda $C6
+    bpl L94E7
+    lda #$F6
+    sta OBJ_POS_X
+    lda $CC
+    sec
+    sbc #$02
+    sta SPR_X_SHADOW
+    bcs L94FA
+    lda SPR_XMSB
+    lsr
+    asl
+    sta SPR_XMSB
+    rts
+L94E7:
+    lda #$0A
+    sta OBJ_POS_X
+    lda $CC
+    clc
+    adc #$0A
+    sta SPR_X_SHADOW
+    bcc L94FA
+    lda SPR_XMSB
+    ora BIT_MASK
+    sta SPR_XMSB
+L94FA:
+    rts
+DRAW_TBL_T0B:
+    .word DRAW_T0B_F0
+    .word DRAW_T0B_F1
+DRAW_TBL_T1B:
+    .word DRAW_T0B_F2
+    .word DRAW_T0B_F1
+DRAW_T0B_F2:
+    lda #$FB
+    pha
+    lda $BC
+    bmi L950D
+    lda #$02
+    .byte $2C
+L950D:
+    .byte $A9,$FE
+    sta $B1
+    lda #$78
+    bne L951A
+DRAW_T0B_F0:
+    lda #$ED
+    pha
+    lda #$50
+L951A:
+    cmp $D9
+    bcc L9520
+    ror ANIM_STATE
+L9520:
+    pla
+    jmp L98FB
+DRAW_T0B_F1:
+    dec FLAG_A1
+    lda STEER_ACCUM
+    sta $B1
+    lda SPR_XMSB
+    asl
+    asl
+    php
+    ror
+    plp
+    ror
+    sta SPR_XMSB
+    lda STEER_SUM
+    sta $D8
+    lda SPEED_SUM
+    sta $D9
+    ldy #$10
+    lda ANIM_STATE
+    cmp #$0B
+    beq L9546
+    ldy #$22
+L9546:
+    jmp $AA8A
+DRAW_TBL_T0C:
+    .word DRAW_T0C_F0
+DRAW_T0C_F0:
+    lda $C7
+    bmi L9561
+    cmp #$0F
+    bcs L955E
+    inc OBJ_TBLAB,x
+    lda STATE_4D05
+    bne L955E
+    inc STATE_4D07
+L955E:
+    inc STATE_4D08
+L9561:
+    lda OBJ_TYPE,x
+    cmp #$0D
+    bne L956A
+    jsr L99B6
+L956A:
+    jmp L97F3
+DRAW_TBL_T0E:
+    .word DRAW_T0E_F0
+    .word DRAW_T0E_F1
+    .word DRAW_T0E_F2
+DRAW_T0E_F0:
+    lda $C7
+    and #$7F
+    cmp #$14
+    bcs L9580
+    lda #$01
+    sta OBJ_TBLAB,x
+L9580:
+    jmp L97F3
+DRAW_T0E_F1:
+    dec OBJ_TBL5B,x
+    bne L958B
+    inc STATE_4D83,x
+L958B:
+    lda FRAME_CTR
+    lsr
+    lsr
+    and #$03
+    tay
+    lda DRAW_T0E_F2_TBL,y
+    cmp OBJ_TBL33,x
+    beq L95A9
+    jsr L99D5
+    lda $95B1,y
+    ldy OBJ_IDX2
+    clc
+    adc SPR_X_SHADOW,y
+    sta SPR_X_SHADOW,y
+L95A9:
+    ldy OBJ_IDX2
+    bpl DRAW_T0E_F0
+DRAW_T0E_F2_TBL:
+    .byte $01,$00,$02,$00,$F8,$08,$06,$FA
+DRAW_T0E_F2:
+    dec OBJ_ANIM,x
+    lda #$3C
+    sta OBJ_TBL5B,x
+    bne DRAW_T0E_F1
+DRAW_TBL_T11:
+    .word DRAW_T11_F0
+    .word DRAW_T11_F1
+DRAW_T11_F0:
+    lda HIT_GROUP2
+    and BIT_MASK_INV
+    sta HIT_GROUP2
+    lda #$00
+    dec STATE_4D5C
+    bne L95E8
+    beq L95E5
+DRAW_T11_F1:
+    lda FLAG_FC
+    bne L95E5
+    lda #$0F
+    sta STATE_4D5C
+    lda SPAWN_Y
+    cmp #$F3
+    txa
+    sta FLAG_FB
+    bcc L95E8
+L95E5:
+    sec
+    ror HERO_STATE
+L95E8:
+    jmp COMMIT_SPRITE_OFS
+DRAW_TBL_T12:
+    .word DRAW_T12_F0
+    .word DRAW_T12_F1
+DRAW_T12_F0:
+    lda $C7
+    bmi L95F6
+    inc STATE_4D07
+L95F6:
+    jsr $99E3
+    jmp L97FB
+DRAW_T12_F1:
+    lda STATE_4D05
+    bne DRAW_T12_F0
+    lda OBJ_TBL5B,x
+    bmi L960B
+    inc OBJ_TBL5B,x
+    bpl DRAW_T12_F0
+L960B:
+    lda $C7
+    bmi L95F6
+    lda $C6
+    and #$7F
+    cmp #$0F
+    bcs DRAW_T12_F0
+    jsr $A2C6
+    lda #$26
+    sta OBJ_TBL5B,x
+    sta OBJ_TBLAB,x
+    bpl DRAW_T12_F0
+DRAW_TBL_T14:
+    .word DRAW_T14_F0
+    .word DRAW_T14_F1
+    .word DRAW_T14_F2
+DRAW_T14_F0:
+    dec OBJ_TBL5B,x
+    bne L9632
+    sec
+    ror OBJ_TYPE,x
+L9632:
+    lda FRAME_CTR
+    and #$03
+    pha
+    jsr COMMIT_SPRITE_OFS
+    pla
+    bne L9645
+    inc OBJ_POS_Y,x
+    bmi L9645
+    beq L9645
+    dec OBJ_POS_Y,x
+L9645:
+    jmp DRAW_T0A_F0
+DRAW_T14_F1:
+    lda #$1E
+    sta OBJ_TBL5B,x
+    dec OBJ_ANIM,x
+    bpl L9632
+DRAW_T14_F2:
+    lda #$01
+    jsr $A106
+    lda #$FE
+    sta OBJ_POS_Y,x
+DRAW_T15_F5:
+    lda SPEED_SUM
+    sta $D9
+    lda STEER_SUM
+    sta $D8
+    lda SPR_XMSB
+    asl
+    sec
+    bmi L9669
+    clc
+L9669:
+    ror
+    sta SPR_XMSB
+    dec OBJ_ANIM,x
+    rts
+DRAW_TBL_T15:
+    .word DRAW_T15_F0
+    .word DRAW_T15_F1
+    .word DRAW_T15_F2
+    .word DRAW_T15_F3
+    .word DRAW_T15_F4
+    .word DRAW_T15_F5
+DRAW_T15_F0:
+    lda #$01
+    sta OBJ_TBLAB,x
+    jmp DRAW_T0A_F0
+DRAW_T15_F1:
+    dec OBJ_TBL5B,x
+    lda OBJ_TBL5B,x
+    and #$07
+    beq L968E
+    rts
+L968E:
+    dec OBJ_ANIM,x
+    lda SPR_Y_SHADOW,y
+    clc
+    adc #$05
+    sta SPR_Y_SHADOW,y
+    lda #$8B
+    jmp SET_SPRITE_PTR
+DRAW_T15_F2:
+    dec OBJ_TBL5B,x
+    lda OBJ_TBL5B,x
+    and #$07
+    beq L96A9
+    rts
+L96A9:
+    dec OBJ_ANIM,x
+    lda #$04
+    sta VIC_SPR_COLOR,x
+    lda #$8A
+    jmp SET_SPRITE_PTR
+DRAW_T15_F3:
+    dec OBJ_TBL5B,x
+    lda OBJ_TBL5B,x
+    and #$07
+    bne L96CB
+    lda #$01
+    jsr $A106
+    dec OBJ_ANIM,x
+    lda #$89
+    jmp SET_SPRITE_PTR
+L96CB:
+    and #$03
+    bne L96D6
+L96CF:
+    ldy #$07
+    jsr $A0EE
+    lda #$00
+L96D6:
+    jmp COMMIT_SPRITE_OFS
+DRAW_T15_F4:
+    jsr SOUND_SILENCE
+    ldy #$1E
+    jsr $AA8A
+    ldy OBJ_IDX2
+    lda #$2F
+    sta OBJ_TBL5B,x
+    dec OBJ_ANIM,x
+    bpl L96CF
+DRAW_TBL_T16:
+    .word DRAW_T16_F0
+    .word DRAW_T16_F1
+    .word DRAW_T16_F2
+    .word DRAW_T15_F5
+DRAW_T16_F0:
+    dec OBJ_TBL5B,x
+    bne L970D
+    sec
+    ror OBJ_TYPE,x
+    bne L9712
+DRAW_T16_F1:
+    dec OBJ_TBL5B,x
+    bne L970D
+    lda #$1E
+    sta OBJ_TBL5B,x
+    dec OBJ_ANIM,x
+    dec SPRITE_PTRS,x
+L970D:
+    lda #$01
+    jsr $A106
+L9712:
+    jmp DRAW_T0A_F0
+DRAW_T16_F2:
+    lda #$1E
+    sta OBJ_TBL5B,x
+    dec OBJ_ANIM,x
+    bpl DRAW_T16_F1
+DRAW_TBL_T18:
+    .word DRAW_T18_F0
+    .word DRAW_T18_F1
+    .word DRAW_T18_F2
+DRAW_T18_F0:
+    lda ROAD_FEATURE
+    cmp #$15
+    bne L9731
+    dec STATE_4D08
+    lda #$01
+    sta $B3
+L9731:
+    lda #$01
+    sta STATE_4DAC
+    bne L9761
+DRAW_T18_F2:
+    lda #$F4
+    sta SPEED_SUM
+    lda #$01
+    jsr $A106
+    inc STATE_4D5C
+    bmi L9747
+    rts
+L9747:
+    ldy #$20
+    jsr SOUND_REQ_V0B
+    dec STATE_9B
+DRAW_T18_F1:
+    lda SPAWN_Y
+    cmp #$A0
+    bcs L975D
+    dec STATE_9B
+    lda #$04
+    sta SEQ_STATE
+    lda #$01
+    .byte $2C
+L975D:
+    .byte $A9,$02
+    sta $A0
+L9761:
+    jsr $99EB
+    lda #$00
+    sta $AB
+    jmp L97FB
+DRAW_TBL_T19:
+    .word DRAW_T19_F0
+    .word DRAW_T19_F1
+DRAW_T19_F0:
+    lda SPR_XMSB
+    lsr
+    pha
+    lsr
+    lda $CC
+    ror
+    php
+    clc
+    adc #$04
+    plp
+    rol
+    sta SPR_X_SHADOW
+    pla
+    rol
+    sta SPR_XMSB
+    inc OBJ_ANIM
+    lda #$06
+    sta OBJ_POS_Y
+    lda #$14
+    sta OBJ_TBL5B
+DRAW_T19_F1:
+    inc OBJ_POS_Y
+    dec OBJ_TBL5B
+    bne L9797
+    dec OBJ_ANIM
+L9797:
+    clc
+    lda SPAWN_Y
+    adc OBJ_POS_Y
+    sta SPR_Y_SHADOW
+    lda HERO_STATE
+    cmp #$18
+    beq L97A7
+    sec
+    ror OBJ_TYPE
+L97A7:
+    rts
+DRAW_TBL_T1A:
+    .word DRAW_T1A_F0
+    .word DRAW_T1A_F1
+DRAW_T1A_F0:
+    lda HIT_GROUP2
+    ora #$01
+    sta HIT_GROUP2
+    lda #$01
+    sta OBJ_TBLAB
+    sta STATE_4DAE
+    jmp DRAW_T0A_F0
+DRAW_T1A_F1:
+    lda SPR_XMSB
+    and #$08
+    clc
+    beq L97C7
+    sec
+L97C7:
+    php
+    lda SPR_XMSB
+    lsr
+    plp
+    rol
+    lda $D0
+    clc
+    adc #$08
+    sta SPR_X_SHADOW
+    lda $D1
+    clc
+    adc #$05
+    sta SPR_Y_SHADOW
+    lda $C7
+    bpl L97F2
+    lda #$FA
+    sta OBJ_POS_Y
+    lda $C6
+    and #$7F
+    cmp #$04
+    bcs L97F2
+    dec OBJ_ANIM
+    ldy #$2A
+    jsr SOUND_REQ_V1
+L97F2:
+    rts
+L97F3:
+    lda ROAD_FEATURE
+    cmp #$03
+    bne L97FB
+    inc OBJ_POS_Y,x
+L97FB:
+    ldy #$0C
+    lda OBJ_TYPE,x
+    cmp #$04
+    bcs L9805
+    ldy #$0E
+L9805:
+    sty ZTMP_09
+    ldy #$00
+    sty ZTMP_08
+    sty ZTMP_0B
+    iny
+    bne L9811
+L9810:
+    plp
+L9811:
+    iny
+    cpy ZTMP_09
+    beq L983C
+    cpy OBJ_IDX2
+    bne L981D
+    iny
+    bne L9811
+L981D:
+    lda SPR_STAGE,y
+    iny
+    asl
+    php
+    lsr
+    cmp #$15
+    bcs L9810
+    lsr ZTMP_0B
+    plp
+    rol ZTMP_0B
+    lda SPR_STAGE,y
+    asl
+    php
+    lsr
+    cmp #$23
+    bcs L9810
+    plp
+    bcc L9811
+    rol ZTMP_08
+L983C:
+    ldy OBJ_IDX2
+    lda STATE_4D07
+    bne L984B
+    lda FRAME_CTR
+    lsr
+    bcc L984B
+    jmp DRAW_T0A_F0
+L984B:
+    lda OBJ_TBL8B,x
+    beq L9859
+    lda OBJ_POS_X,x
+    bne L9856
+    inc OBJ_POS_X,x
+L9856:
+    jmp DRAW_T0A_F0
+L9859:
+    lda ZTMP_08
+    beq L98A0
+    lda ZTMP_0B
+    beq L9879
+    lda OBJ_TBL6B,x
+    cmp OBJ_TBL7B,x
+    bne L988F
+L9869:
+    lda OBJ_POS_X,x
+    bmi L9874
+    cmp OBJ_TBL43,x
+    beq L9876
+    bcs L988A
+L9874:
+    inc OBJ_POS_X,x
+L9876:
+    jmp DRAW_T0A_F0
+L9879:
+    lda OBJ_TBL63,x
+    cmp OBJ_TBL7B,x
+    bne L988F
+L9881:
+    lda OBJ_POS_X,x
+    cmp OBJ_TBL3B,x
+    beq L988C
+    bmi L9874
+L988A:
+    dec OBJ_POS_X,x
+L988C:
+    jmp DRAW_T0A_F0
+L988F:
+    lda OBJ_POS_Y,x
+    cmp OBJ_TBL4B,x
+    bpl L9898
+    inc OBJ_POS_Y,x
+L9898:
+    lda OBJ_POS_X,x
+    beq DRAW_T0A_F0
+    bmi L9874
+    bpl L988A
+L98A0:
+    lda STATE_4D08
+    bmi L98BF
+    clc
+    beq L98A9
+    sec
+L98A9:
+    lda FRAME_CTR
+    and #$07
+    bne L98BF
+    bcs L98DC
+L98B1:
+    lda OBJ_POS_Y,x
+    cmp OBJ_TBL53,x
+    bmi L98BD
+    dec OBJ_POS_Y,x
+    jmp L98BF
+L98BD:
+    inc OBJ_POS_Y,x
+L98BF:
+    lda OBJ_TBL63,x
+    cmp OBJ_TBL7B,x
+    bne L9869
+    lda OBJ_TBL6B,x
+    cmp OBJ_TBL7B,x
+    bne L9881
+    lda STATE_4D07
+    beq L9898
+    lda $C6
+    beq L9898
+    bpl L9869
+    bmi L9881
+L98DC:
+    lda $C7
+    beq L98BF
+    bmi L98B1
+    cmp #$05
+    bcc L98BF
+    lda #$00
+    sec
+    sbc ROAD_X_REF
+    cmp OBJ_POS_Y,x
+    bmi L98BF
+    lda OBJ_POS_Y,x
+    cmp OBJ_TBL4B,x
+    bpl L98BF
+    inc OBJ_POS_Y,x
+    jmp L98BF
+L98FB:
+    sec
+    sbc ROAD_X_REF
+    sta OBJ_POS_Y,x
+DRAW_T0A_F0:
+    ldx OBJ_IDX
+    ldy OBJ_IDX2
+    lda OBJ_POS_X,x
+    php
+    clc
+    adc SPR_X_SHADOW,y
+    sta SPR_X_SHADOW,y
+    bcs L9915
+    plp
+    bmi L9918
+    bpl L991E
+L9915:
+    plp
+    bmi L991E
+L9918:
+    lda BIT_MASK
+    eor SPR_XMSB
+    sta SPR_XMSB
+L991E:
+    lda OBJ_TBL73,x
+    bpl L9926
+    sec
+    ror OBJ_TYPE,x
+L9926:
+    lda OBJ_POS_Y,x
+    pha
+    lda SPR_Y_SHADOW,y
+    tax
+    pla
+    clc
+    adc SPR_Y_SHADOW,y
+    clc
+    adc ROAD_X_REF
+    cpx #$0C
+    bcc L9946
+    cpx #$F3
+    bcc L994D
+    cmp #$E9
+    jsr L9951
+    bcc L9950
+    bcs L994D
+L9946:
+    cmp #$16
+    jsr L9951
+    bcs L9950
+L994D:
+    sta SPR_Y_SHADOW,y
+L9950:
+    rts
+L9951:
+    php
+    pha
+    ldx OBJ_IDX
+    lda OBJ_TBLAB,x
+    beq L9962
+    lda #$00
+    sta OBJ_TBLAB,x
+    sec
+    ror OBJ_TYPE,x
+L9962:
+    pla
+    plp
+    rts
+DRAW_TIMER_GATE:
+    lda FRAME_CTR
+    and #$03
+    beq L996C
+    rts
+L996C:
+    lda STATE_9B
+    cmp #$02
+    lda #$04
+    bcc L998C
+    eor STATE_4D34
+    bpl L998C
+    lda SCROLL_SPEED
+    beq L998C
+    lda OBJ_TBL79
+    beq L998C
+    ldy #$0E
+    jsr $AA86
+    lda STATE_4D39
+    eor #$01
+L998C:
+    jmp L99D5
+L998F:
+    lda $A0
+    beq L9997
+    lda #$95
+    bne SET_SPRITE_PTR
+L9997:
+    sec
+    lda #$04
+    sbc SCROLL_SPEED
+    tay
+    lda #$00
+L999F:
+    dey
+    bmi L99A6
+    sec
+    rol
+    bne L999F
+L99A6:
+    and FRAME_CTR
+    bne DRAW_DISPATCH_99D8
+    dec STATE_4D39
+    bpl DRAW_DISPATCH_99D8
+    lda #$02
+    sta STATE_4D39
+    bpl DRAW_DISPATCH_99D8
+L99B6:
+    ldy OBJ_IDX2
+    lda SEQ_STATE
+    cmp #$02
+    bcc L99D3
+    lda $C7
+    and #$7F
+    cmp #$1E
+    bcs L99D3
+    ldy #$18
+    jsr SOUND_REQ_V0
+DRAW_DISPATCH_99CB:
+    dec OBJ_TBL33,x
+    bpl DRAW_DISPATCH_99D8
+    lda #$02
+    .byte $2C
+L99D3:
+    .byte $A9,$00
+L99D5:
+    sta OBJ_TBL33,x
+DRAW_DISPATCH_99D8:
+    lda OBJ_TBL33,x
+COMMIT_SPRITE_OFS:
+    clc
+    adc OBJ_TBL23,x
 
-; -----------------------------------------------------------------------
-; Store A as the sprite pointer for slot X (SPRITE_PTRS,x).
 SET_SPRITE_PTR:
     sta SPRITE_PTRS,x
     rts
@@ -3505,7 +4947,7 @@ MOVE_BOAT_MAIN:
     beq MOVE_BOAT_CRASH
     jsr HAZARD_CHECK_07
     bne MOVE_BOAT_CONTINUE
-    jsr $A7C1
+    jsr SEGMENT_FX_HELPER
 ; No hazard hit this frame - just continue (consume HIT_MASK_A for this slot).
 MOVE_BOAT_CONTINUE:
     jmp CONSUME_HIT_MASK_A
@@ -3636,7 +5078,7 @@ MOVE_TYPE_0C:
 MOVE_HAZARD_TAIL:
     jsr HAZARD_CHECK_07
     bne MOVE_HAZARD_TAIL_B
-    jsr $A7C1
+    jsr SEGMENT_FX_HELPER
     inc OBJ_TBL8B,x
 MOVE_HAZARD_TAIL_B:
     jsr HAZARD_CHECK_0C
@@ -4781,7 +6223,7 @@ MAP_COPY_BLOCK_DONE:
 ; callers (SPEEDCODE_IMAGE and the hero/object move-handler block):
 ;   - SPEED_STEP_DOWN (fallthrough): A=-1 (decelerate)
 ;   - SPEED_STEP_UP (overlap entry): A=+1 (accelerate) - called from the
-;     hero/object move-handler block (Stage 5, still undissected)
+;     hero/object move-handler block (Stage 5)
 ;   - SPEED_SET (overlap entry, mid-routine): skips the throttle/clamp
 ;     entirely and stores whatever's in A straight to SCROLL_SPEED/
 ;     ROAD_X_REF - called from SPEEDCODE_IMAGE with a precomputed target
@@ -5202,17 +6644,89 @@ RESET_SCROLL_VARS:
     sta SCENE_IDX
     rts
 ; -----------------------------------------------------------------------
-; Attract / road-reset helper CODE (not yet disassembled - same situation as
-; the larger blocks noted in Stage 5) plus a $5Axx screen row-address table.
-    .byte $9E,$9F,$A0,$A1,$A2,$DE,$5B,$4D,$D0,$09,$A5,$FF,$30,$17,$D0,$04
-    .byte $FE,$5B,$4D,$60,$A9,$FF,$85,$FF,$A9,$2D,$9D,$5B,$4D,$A0,$0A,$20
-    .byte $82,$AA,$4C,$FE,$A2,$A9,$00,$85,$FF,$A0,$1E,$20,$82,$AA,$A5,$E8
-    .byte $D0,$DE,$A9,$98,$85,$24,$A9,$A2,$85,$25,$A0,$01,$BD,$73,$4D,$C9
-    .byte $02,$F0,$07,$C8,$E6,$24,$D0,$02,$E6,$25,$18,$BD,$B3,$4D,$69,$01
-    .byte $85,$98,$BD,$BB,$4D,$69,$01,$85,$99,$C9,$14,$A9,$00,$B0,$06,$85
-    .byte $97,$84,$31,$84,$E8,$2C,$A9,$A0,$A0,$03,$20,$07,$A3,$A0,$00,$99
-    .byte $2D,$5A,$99,$33,$5A,$99,$6F,$5A,$99,$75,$5A,$99,$86,$5A,$99,$8C
-    .byte $5A,$99,$C8,$5A,$99,$CE,$5A,$99,$1E,$5B,$60
+; Attract / road-reset helper: arms/advances a short countdown
+; (OBJ_TBL5B,x / FLAG_FF) and, once it expires (BLIT_ROWS reaches 0), sets
+; up STREAM_PTR to ATTRACT_HELPER_TBL ($A298, a small 5-byte value table -
+; consumed indirectly elsewhere, not decoded further here), computes a
+; staged screen row/column (BLIT_ROW/BLIT_COL) from OBJ_TBLB3/OBJ_TBLBB, and
+; finally writes a fixed set of 9 $5Axx screen-row addresses (candidate:
+; attract-mode text row pointers). Called from the hero/object move-handler
+; block (claude/Hero_Object_Move_Handler_Notes.md) - the two call sites
+; there have been updated from raw hex to this name. One more
+; "BIT-absolute as a 2-byte skip" overlap trick, same idiom as the two
+; larger draw-handler blocks.
+ATTRACT_HELPER_TBL:
+    .byte $9E,$9F,$A0,$A1,$A2
+ATTRACT_HELPER:
+    dec OBJ_TBL5B,x
+    bne LA2AB
+    lda FLAG_FF
+    bmi ATTRACT_HELPER_ADVANCE
+    bne ATTRACT_HELPER_ARM
+LA2A8:
+    inc OBJ_TBL5B,x
+LA2AB:
+    rts
+ATTRACT_HELPER_ARM:
+    lda #$FF
+    sta FLAG_FF
+    lda #$2D
+    sta OBJ_TBL5B,x
+    ldy #$0A
+    jsr SOUND_REQ_V1
+    jmp ATTRACT_HELPER_ROWS
+ATTRACT_HELPER_ADVANCE:
+    lda #$00
+    sta FLAG_FF
+    ldy #$1E
+    jsr SOUND_REQ_V1
+    lda BLIT_ROWS
+    bne LA2A8
+    lda #$98
+    sta STREAM_PTR
+    lda #$A2
+    sta STREAM_PTR_HI
+    ldy #$01
+    lda OBJ_TBL73,x
+    cmp #$02
+    beq LA2E2
+    iny
+    inc STREAM_PTR
+    bne LA2E2
+    inc STREAM_PTR_HI
+LA2E2:
+    clc
+    lda OBJ_TBLB3,x
+    adc #$01
+    sta BLIT_COL
+    lda OBJ_TBLBB,x
+    adc #$01
+    sta BLIT_ROW
+    cmp #$14
+    lda #$00
+    bcs LA2FD
+    sta OBJ_COLOR
+    sty BLIT_WIDTH
+    sty BLIT_ROWS
+LA2FD:
+    .byte $2C
+ATTRACT_HELPER_ROWS:
+    .byte $A9,$A0
+    ldy #$03
+    jsr ATTRACT_HELPER_STORE_ROWS
+    ldy #$00
+ATTRACT_HELPER_STORE_ROWS:
+    sta $5A2D,y
+    sta $5A33,y
+    sta $5A6F,y
+    sta $5A75,y
+    sta $5A86,y
+    sta $5A8C,y
+    sta $5AC8,y
+    sta $5ACE,y
+    sta $5B1E,y
+    rts
+
 
 ; -----------------------------------------------------------------------
 ; Wait for the IRQ frame flag; every 4th frame decrement the BCD game timer.
@@ -5858,17 +7372,101 @@ SEGMENT_FX_FIRE:
     sta FX_COUNT
     jmp COMMON_FX_BLIT
 ; -----------------------------------------------------------------------
-; Effect spawn/param helper code plus FX parameter tables, as data.
-    .byte $10,$10,$B7,$10,$B9,$BB,$10,$BD,$10,$10,$10,$10,$10,$B8,$BC,$BA
-    .byte $BE,$10,$10,$10,$17,$10,$15,$11,$0C,$1B,$0A,$1C,$12,$21,$10,$22
-    .byte $A5,$E8,$D0,$73,$A9,$04,$C5,$44,$B0,$08,$C5,$45,$90,$69,$A5,$45
-    .byte $10,$02,$A5,$44,$0A,$0A,$A8,$D0,$07,$BD,$B3,$4D,$C9,$14,$90,$1B
-    .byte $BD,$B3,$4D,$C9,$0A,$90,$50,$C9,$23,$B0,$4C,$38,$F9,$B5,$A7,$18
-    .byte $69,$04,$30,$04,$C9,$08,$90,$11,$BD,$B3,$4D,$C8,$38,$F9,$B5,$A7
-    .byte $18,$69,$04,$30,$32,$C9,$08,$B0,$2E,$C8,$C8,$B9,$B5,$A7,$85,$98
-    .byte $98,$4A,$90,$06,$A9,$AB,$A0,$A7,$D0,$04,$A9,$A1,$A0,$A7,$85,$24
-    .byte $84,$25,$A9,$02,$85,$31,$A9,$00,$85,$97,$BD,$BB,$4D,$85,$99,$C9
-    .byte $14,$B0,$04,$A9,$05,$85,$E8,$A4,$07,$60,$1C,$1E,$40,$20,$28,$26
+; Effect spawn/param helper: given a ROAD_FEATURE/PREV_FEATURE code, looks
+; it up in SEGMENT_FX_FEATURE_TBL to find a column offset (BLIT_COL) and
+; picks between two 10-byte parameter tables (SEGMENT_FX_TBL_A/B, set up as
+; a STREAM_PTR for indirect consumption elsewhere - same idiom as
+; ATTRACT_HELPER's table in the previous block) based on odd/even feature
+; index. Falls into the existing TALLY_CHAR_TBL bytes at the end (already a
+; named equate from elsewhere in the file - no new label needed there, the
+; assembled bytes are unchanged).
+;
+; Entry point SEGMENT_FX_HELPER was previously left as raw hex ($A7C1) at
+; its two call sites inside the collision-detection block
+; (claude/Collision_Detection_Notes.md's MOVE_BOAT_MAIN hazard chain) -
+; updated to use this name.
+SEGMENT_FX_TBL_A:
+    .byte $10,$10,$B7,$10,$B9,$BB,$10,$BD,$10,$10
+SEGMENT_FX_TBL_B:
+    .byte $10,$10,$10,$B8,$BC,$BA,$BE,$10,$10,$10
+SEGMENT_FX_FEATURE_TBL:
+    .byte $17,$10,$15,$11,$0C,$1B,$0A,$1C,$12,$21,$10,$22
+SEGMENT_FX_HELPER:
+    lda BLIT_ROWS
+    bne LA838
+    lda #$04
+    cmp ROAD_FEATURE
+    bcs LA7D3
+    cmp PREV_FEATURE
+    bcc LA838
+    lda PREV_FEATURE
+    bpl LA7D5
+LA7D3:
+    lda ROAD_FEATURE
+LA7D5:
+    asl
+    asl
+    tay
+    bne LA7E1
+    lda OBJ_TBLB3,x
+    cmp #$14
+    bcc LA7FC
+LA7E1:
+    lda OBJ_TBLB3,x
+    cmp #$0A
+    bcc LA838
+    cmp #$23
+    bcs LA838
+    sec
+    sbc SEGMENT_FX_FEATURE_TBL,y
+    clc
+    adc #$04
+    bmi LA7F9
+    cmp #$08
+    bcc LA80A
+LA7F9:
+    lda OBJ_TBLB3,x
+LA7FC:
+    iny
+    sec
+    sbc SEGMENT_FX_FEATURE_TBL,y
+    clc
+    adc #$04
+    bmi LA838
+    cmp #$08
+    bcs LA838
+LA80A:
+    iny
+    iny
+    lda SEGMENT_FX_FEATURE_TBL,y
+    sta BLIT_COL
+    tya
+    lsr
+    bcc LA81B
+    lda #$AB
+    ldy #$A7
+    bne LA81F
+LA81B:
+    lda #$A1
+    ldy #$A7
+LA81F:
+    sta STREAM_PTR
+    sty STREAM_PTR_HI
+    lda #$02
+    sta BLIT_WIDTH
+    lda #$00
+    sta OBJ_COLOR
+    lda OBJ_TBLBB,x
+    sta BLIT_ROW
+    cmp #$14
+    bcs LA838
+    lda #$05
+    sta BLIT_ROWS
+LA838:
+    ldy OBJ_IDX2
+    rts
+    .byte $1C,$1E,$40,$20,$28,$26
+
 
 ; -----------------------------------------------------------------------
 ; Award any queued scoring events (SCORE_EVENT[]).

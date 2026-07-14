@@ -6,39 +6,32 @@ tracker) - see the verification note at the bottom.
 
 ## Current status
 
-- **479+ labels**, effectively all real names now (only a handful of
-  auto-generated `LXXXX:` addresses remain).
-- **~3.2 KB of the 16 KB ROM (~20%)** is still raw `.byte` data flagged
-  "reached only indirectly via a runtime dispatch vector" - down from
-  ~4.3 KB two sessions ago. Everything else is either real, annotated
-  6502 instructions or legitimate, identified graphics/table data.
+- **540+ labels**, effectively all real names now (only a handful of
+  auto-generated `LXXXX:` addresses remain, mostly internal branch targets
+  inside the four blocks converted this session - see below).
+- **Phase 1 is complete.** All four remaining "raw data that's actually
+  code" blocks (~3.2 KB total) have been converted to labelled instructions
+  and verified byte-identical against `spyhunter.bin`. This file no longer
+  has any undissected code - what remains as raw `.byte` is legitimate,
+  identified graphics/table data.
 
-## Phase 1 - Remaining code-to-instructions conversions (4 blocks, ~3.2 KB)
+## Phase 1 - Code-to-instructions conversions (COMPLETE)
 
-The last of the "raw data that's actually code" blocks. Same process each
-time: verified straight-line disassembly, label/equate map, multi-entry
-"BIT-as-skip" overlaps handled as raw bytes with labels, mechanically
-generated where the block is large/dense, byte-diffed against the ROM
-before ever touching the real file.
-
-| # | Block | Size | Location | Why it matters |
+| # | Block | Size | Location | Result |
 |---|---|---|---|---|
-| 25 | Per-object handler | ~1.25 KB | after `INIT_OBJECT_SLOT` | Likely per-enemy-type behavior/weapons |
-| 26 | Largest per-object handler | ~1.65 KB | after `MUSIC_START_THEME` | Best remaining candidate for the Road Lord's "can't be shot" logic and the enemy-destroyed -> `SCORE_EVENT` tier mapping; also very likely holds the six data tables `COMMIT_TYPE` (in the hero/object move-handler block, already converted) reads from |
-| 28 | Attract/road-reset helper | ~139 B | after `RESET_SCROLL_VARS` | |
-| 29 | Effect spawn/param helper + FX tables | ~160 B | after `SEGMENT_FX_FIRE` | |
+| 25 | Per-object handler | 1250 B | after `INIT_OBJECT_SLOT` | **Done** - the counterpart to #26: draw routines for `OBJ_TYPE` `$00`-`$05`/`$07`/`$08` (the hero's own type shares one 10-frame table, by far the largest), plus the 7 `TYPE_TBL_*` init tables `COMMIT_TYPE` reads from |
+| 26 | Largest per-object handler | 1655 B | after `MUSIC_START_THEME` | **Done** - the per-object-type DRAW dispatch: 15 per-animation-frame address tables + ~40 draw routines, reached via `OBJINIT_PARAM_TBL`'s draw-vector column through a two-stage `ZVEC_DRAW` indirection. Confirmed the `$12`/`$13` boat and `$1B` bullet draw tables live here |
+| 28 | Attract/road-reset helper | 139 B | after `RESET_SCROLL_VARS` | **Done** - `ATTRACT_HELPER`, a countdown-driven effect trigger called from the hero/object move-handler block |
+| 29 | Effect spawn/param helper + FX tables | 160 B | after `SEGMENT_FX_FIRE` | **Done** - `SEGMENT_FX_HELPER`, a `ROAD_FEATURE`-indexed parameter lookup called from `MOVE_BOAT_MAIN`'s hazard chain |
 
-Recommended order: **26 then 25** - block 26 is the highest-value target
-(scoring/Road Lord), and finishing both closes out essentially all of
-Phase 2 below as a side effect (the OBJ_TYPE-to-enemy and kill-tier
-questions almost certainly resolve once these are readable). 28 and 29 are
-small, low-risk, do whenever.
+Full writeup: `claude/Draw_Handler_Notes.md` (all four blocks). None of the
+four turned out to hold the Road Lord/scoring logic that was the original
+motivation for prioritising #26 - see Phase 2 below, still open.
 
 ## Phase 2 - Open research questions (investigation, not conversion)
 
-Likely to resolve naturally once Phase 1 is done, since they're contained
-in the blocks being converted - but worth explicitly re-checking rather
-than assuming:
+Now that all code is converted and readable, these are pure semantic-
+identification questions rather than "find the code" questions:
 
 - **#32** - Where does `OBJ_TYPE` map down to a `POINTS_TBL` kill tier
   (0/500/700) when an enemy is destroyed? `SCORE_EVENT`'s queue-write site
@@ -74,8 +67,7 @@ just static reading), separate from Phase 1's code conversion:
 Re-scanned `spyhunter.asm` directly for every comment matching "as data" /
 "not yet disassembled" / "left for a future session" / "stored as data" /
 "kept as data" / "left unexpanded", rather than trusting the session task
-tracker alone - two matches turned out to be stale phrasing inside
-already-converted code (the `SPEED_STEP` overlap bytes, and a descriptive
-aside inside the already-confirmed `POINTS_TBL` comment) and were excluded.
-The four blocks in Phase 1 are the complete, current list of genuine
-undissected code.
+tracker alone. As of this update, the only remaining hit is stale phrasing
+inside the already-converted `SPEED_STEP` comment describing *past* state
+(fixed in passing) - there is no other genuine undissected code left in the
+file.

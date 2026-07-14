@@ -6381,13 +6381,99 @@ DISPATCH_COMMAND:
 ; commands based on what a music sequencer typically needs: loop/repeat,
 ; jump to a different sequence, tempo/rate change - not individually
 ; decoded in this pass.
-    .byte $29,$AB,$38,$AB,$7A,$AB,$A9,$00,$95,$55,$A8,$A6,$4C,$9D,$04,$D4
-    .byte $A6,$4B,$4C,$F6,$AA,$B1,$50,$C8,$29,$1F,$0A,$AA,$BD,$BB,$BC,$85
-    .byte $4D,$BD,$BC,$BC,$85,$4E,$20,$04,$AC,$A5,$4D,$95,$61,$A5,$4E,$95
-    .byte $5E,$B1,$50,$C8,$29,$1F,$0A,$AA,$BD,$BB,$BC,$85,$4D,$BD,$BC,$BC
-    .byte $A6,$4B,$95,$64,$A5,$4D,$95,$67,$B1,$50,$C8,$95,$6D,$B1,$50,$C8
-    .byte $95,$6A,$95,$58,$4C,$F6,$AA,$B1,$50,$C8,$95,$52,$48,$B1,$50,$C8
-    .byte $95,$55,$85,$51,$68,$85,$50,$A0,$00,$4C,$03,$AB
+; SNDCMD_VEC_LO/HI (the command-handler address table DISPATCH_COMMAND
+; reads) plus the three music command handlers themselves - now fully
+; converted to labelled instructions. Reached only via DISPATCH_COMMAND's
+; "push address-1, then RTS" indirect jump, so a straight-line disassembler
+; never finds them; the vector table stores each handler's address MINUS
+; ONE (confirmed: the raw bytes decode to $AB29/$AB38/$AB7A, each exactly
+; one byte before a clean instruction boundary - the classic 6502 "JSR/RTS
+; trick" offset, needed because RTS always adds 1 to the popped address).
+;
+; Command 0 - CMD_VOICE_OFF: deactivate this voice's sequence (SND_SEQ,x=0,
+; the same flag MUSIC_DRIVER's VOICE_LOOP checks to skip an idle voice) and
+; silence its SID control register directly - a "stop/rest" command.
+;
+; Command 1 - CMD_SLIDE_START: reads a note index from the sequence, looks
+; up its frequency and writes it to the SID immediately (via
+; SID_WRITE_FREQ) as the slide's starting point, then reads a SECOND note
+; index for the slide's target frequency (SND_TGT_LO/HI), a rate byte
+; (SND_RATE) and a duration byte (SND_DUR, reusing the same value as
+; SND_RATE) - arming SND_SLIDE_HI/LO (nonzero) so PROCESS_STEP's
+; APPLY_SLIDE continues the portamento on subsequent duration ticks. A
+; pitch-bend/portamento note command.
+;
+; Command 2 - CMD_SEQ_JUMP: reads a new 16-bit sequence pointer from the
+; current position and installs it both into this voice's saved pointer
+; slots (SND_PTR0_LO,x/SND_SEQ,x) and the live SND_SEQ_PTR/HI, resets the
+; read position to 0, and jumps back into PROCESS_STEP to continue from the
+; new location - a "loop/jump to a different sequence" command, confirming
+; the original comment's guess.
+; SNDCMD_VEC_LO/HI equates (declared near the top of this file) already
+; point at this exact address - not re-labelled here to avoid a duplicate
+; symbol. Entries are interleaved (lo,hi) pairs, matching the x=cmd*2
+; indexing DISPATCH_COMMAND uses (SNDCMD_VEC_HI = SNDCMD_VEC_LO+1) - the
+; same layout as OBJMOVE_VEC_LO/HI elsewhere in this file.
+    .byte <(CMD_VOICE_OFF-1), >(CMD_VOICE_OFF-1)
+    .byte <(CMD_SLIDE_START-1), >(CMD_SLIDE_START-1)
+    .byte <(CMD_SEQ_JUMP-1), >(CMD_SEQ_JUMP-1)
+
+CMD_VOICE_OFF:
+    lda #$00
+    sta SND_SEQ,x
+    tay
+    ldx SND_REGOFS
+    sta SID_V1_CTRL,x
+    ldx SND_VOICE
+    jmp VOICE_ADVANCE
+CMD_SLIDE_START:
+    lda (SND_SEQ_PTR),y
+    iny
+    and #$1F
+    asl
+    tax
+    lda SND_FREQ_LO_TBL,x
+    sta SND_PTR_LO
+    lda SND_FREQ_HI_TBL,x
+    sta SND_PTR_HI
+    jsr SID_WRITE_FREQ
+    lda SND_PTR_LO
+    sta SND_FREQ_LO,x
+    lda SND_PTR_HI
+    sta SND_SLIDE_HI,x
+    lda (SND_SEQ_PTR),y
+    iny
+    and #$1F
+    asl
+    tax
+    lda SND_FREQ_LO_TBL,x
+    sta SND_PTR_LO
+    lda SND_FREQ_HI_TBL,x
+    ldx SND_VOICE
+    sta SND_TGT_LO,x
+    lda SND_PTR_LO
+    sta SND_TGT_HI,x
+    lda (SND_SEQ_PTR),y
+    iny
+    sta SND_SLIDE_LO,x
+    lda (SND_SEQ_PTR),y
+    iny
+    sta SND_RATE,x
+    sta SND_DUR,x
+    jmp VOICE_ADVANCE
+CMD_SEQ_JUMP:
+    lda (SND_SEQ_PTR),y
+    iny
+    sta SND_PTR0_LO,x
+    pha
+    lda (SND_SEQ_PTR),y
+    iny
+    sta SND_SEQ,x
+    sta SND_SEQ_PTR_HI
+    pla
+    sta SND_SEQ_PTR
+    ldy #$00
+    jmp PROCESS_STEP
 
 ; Play a note: the byte just read packs a 6-bit note index (bits 0-5, look
 ; up its frequency in SND_FREQ_LO/HI_TBL and write it to the SID via

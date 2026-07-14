@@ -131,17 +131,32 @@ Rebuilt and verified: `spyhunter.bin` MD5 unchanged at
 all renames and the data->code conversion are comment/label-only, no
 assembled bytes changed.
 
+## Update (follow-up session): the machine-gun trigger is slot 7, not slot 6
+
+The `$8CE0`/`GUN_CHECK_FIRE` fragment mentioned above has now been fully
+traced as part of converting the whole hero/object move-handler block
+(`$8B2F`-`$8E33`) to real instructions - see
+`claude/Hero_Object_Move_Handler_Notes.md` for the complete writeup. The
+short version, correcting this doc's earlier speculation:
+
+* The `JOY1_FIRE_BTN` check is **slot 7**'s own MOVE routine
+  (`MOVE_GUN_SLOT`, `$8CC2`), not slot 6 as guessed above - slot 6 turned
+  out to be the **boat** object instead (`MOVE_BOAT_SLOT`, `$8C90` - it sets
+  `STATE_4D05`, the exact per-boat crash-sequence flag from
+  `claude/Collision_Detection_Notes.md`'s `MOVE_TYPE_05_06`).
+* `$C6`/`$C7` (the proximity/cooldown check gating a shot) are confirmed as
+  `SPR_STAGE`-family bytes for a slot index, but not yet pinned to a
+  specific slot's meaning - still open.
+* A successful shot commits slot 7's own `OBJ_TYPE` to `$1B` - directly
+  explaining `MOVE_TYPE_1B` from the collision-detection session, which was
+  previously unexplained ("(???)" in that doc). `$1B` is the "live bullet"
+  object type.
+
 ## Still open
 
 * The exact demo-AI logic in `ATTRACT_AUTODRIVE` (what `OBJ_TBL69`/`OBJ_TBL71`
   and `SCROLL_SPEED` mean in that specific context).
-* `HERO_STATE=$07`'s meaning (the gate on machine-gun fire at `$8CEF`), and
-  what `$C6`/`$C7` (read bare/unindexed at `$8CF9`-`$8CFD`) represent - a
-  proximity/cooldown check tied to firing, not yet named. If these fall
-  within the `SPR_STAGE` array's addressing (`$BA`-`$C9`, 2 bytes/slot),
-  they'd correspond to object slot 6's clamped sprite delta - possibly a
-  dedicated bullet/projectile slot, which would make this a "can't fire
-  again until the last shot clears" check. Not confirmed.
-* Full expansion of the ~1650-byte hero/object move-handler block itself
-  remains a separate future task - only the joystick-1-fire fragment inside
-  it has been traced so far.
+* `HERO_STATE=$07`'s meaning (the gate on machine-gun fire), and exactly
+  what `$C6`/`$C7` represent (see `claude/Hero_Object_Move_Handler_Notes.md`).
+* The full per-object handler blocks after `INIT_OBJECT_SLOT` and
+  `MUSIC_START_THEME` remain separate future tasks.

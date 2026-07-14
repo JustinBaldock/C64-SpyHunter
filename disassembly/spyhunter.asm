@@ -445,6 +445,9 @@ FRAME_FLAG = $4D00    ; IRQ frame counter (waited on)
 GAME_TIME_LO = $4D01    ; game timer BCD lo (on-screen timer)
 GAME_TIME_HI = $4D02    ; game timer BCD hi
 IRQ_TOGGLE = $4D03    ; IRQ scroll toggle
+STATE_4D04 = $4D04    ; per-slot "pending/last type change" value (???), set
+                      ;   alongside a committed OBJ_TYPE change - see the
+                      ;   hero/object move-handler block, Stage 5
 STATE_4D05 = $4D05
 NEXT_LIFE_SCORE = $4D06    ; next extra-life threshold
 STATE_4D07 = $4D07
@@ -513,7 +516,14 @@ HIT_GROUP0 = $4D1F    ; collision group mask 0
 HIT_GROUP1 = $4D20    ; collision group mask 1
 HIT_GROUP2 = $4D21    ; collision group mask 2
 HIT_ACCUM = $4D22    ; collision accumulator
+OBJ_TBL23 = $4D23    ; per-slot value, written alongside OBJ_TBL2B/SPRITE_PTRS (???)
 SPRITE_PTRS = $4D2B    ; sprite pointer shadow (copied to $7BF8 each frame)
+OBJ_TBL33 = $4D33    ; per-slot value (???)
+OBJ_TBL3B = $4D3B    ; per-slot value, low nibble of a signed offset (???)
+OBJ_TBL43 = $4D43    ; per-slot value, low nibble of a signed offset (???)
+OBJ_TBL4B = $4D4B    ; per-slot value, low nibble of a signed offset (???)
+OBJ_TBL53 = $4D53    ; per-slot value, combines OBJ_TBL3B/4B/43 nibbles (???)
+OBJ_TBL5B = $4D5B    ; per-slot value (???)
 OBJ_TBL63 = $4D63
 OBJ_TBL69 = $4D69
 OBJ_TBL6B = $4D6B
@@ -547,16 +557,20 @@ VIC_CR1 = $D011    ; control reg 1 (Y-scroll/rows/RSEL)
 VIC_RASTER = $D012    ; raster line / compare
 VIC_SPR_ENA = $D015    ; sprite enable
 VIC_CR2 = $D016    ; control reg 2 (X-scroll/MCM/40col)
+VIC_SPR_YEXP = $D017    ; sprite Y-expand (double height), one bit per sprite
 VIC_MEMPTR = $D018    ; screen+charset pointers
 VIC_IRR = $D019    ; interrupt request reg
 VIC_IMR = $D01A    ; interrupt mask reg
 VIC_SPR_BGPRI = $D01B    ; sprite-bg priority
+VIC_SPR_MCM = $D01C    ; per-sprite multicolour-mode enable, one bit per sprite
+VIC_SPR_XEXP = $D01D    ; sprite X-expand (double width), one bit per sprite
 VIC_BORDER = $D020    ; border colour
 VIC_BG0 = $D021    ; background colour 0
 VIC_BG1 = $D022    ; background colour 1
 VIC_BG2 = $D023    ; background colour 2
 VIC_SPRMC0 = $D025    ; sprite multicolour 0
 VIC_SPRMC1 = $D026    ; sprite multicolour 1
+VIC_SPR_COLOR = $D027    ; per-sprite individual colour (8 regs, $D027-$D02E)
 ; --- SID (sound chip) hardware registers, $D400+: 3 independent voices, each
 ; with frequency, waveform/gate control, and an ADSR (attack/decay/sustain/
 ; release) envelope, plus one shared filter/volume register.
@@ -2623,23 +2637,49 @@ ALL_SLOTS_DONE:
 ; sub-state finding in claude/Dock_Exit_Notes.md / Enemy_Invincibility_Notes.md).
 ;
 ; After the vector tables, this data block continues into the ACTUAL MACHINE
-; CODE for the per-object-type move/draw handlers themselves (e.g. the
-; hero's own move logic starting around $8EA5 - readable opcode-by-opcode if
-; you want to trace it: A5 A3 = LDA HERO_STATE, C9 07 = CMP #$07, and so on).
-; These handlers are only ever reached INDIRECTLY, through OBJ_VEC1_DISPATCH/
-; OBJ_VEC2_DISPATCH's runtime pointer lookup (PROCESS_OBJECTS above) - a
-; disassembler walking the file top-to-bottom in a straight line has no way
-; to know code lives here, so it's left as raw .byte data rather than
-; expanded into labelled instructions. This is genuinely the single largest
-; remaining undisassembled chunk of real game logic in this file - it's
-; extremely likely where per-enemy-type behaviour (the Road Lord's "can't be
-; shot", the different weapons, etc. - see claude/Enemy_Agents_Manual_Reference.md)
-; and the enemy-destroyed -> SCORE_EVENT scoring-tier logic actually live.
-; Turning this into real, commented 6502 (rather than one big data blob) is
-; a substantial task of its own, left for a future session.
+; CODE for the per-object-type move/draw handlers themselves - now fully
+; converted to labelled instructions below (previously left as raw .byte
+; data; a straight-line disassembler has no way to know code lives here,
+; since these routines are only reached INDIRECTLY through OBJMOVE_VEC_LO/HI
+; - the "bit 7 set" dispatch path in PROCESS_OBJECTS above - not through
+; OBJINIT_PARAM_TBL's own per-TYPE vectors).
 ;
-; One spot IS confirmed: at $8CE0 (LDA $4D0B), this reads JOY1_FIRE_BTN
-; (joystick 1's own fire button) and gates a DEC of GUN_HEAT ($F6) when
+; Five distinct routines, one per SLOT that OBJMOVE_VEC_LO/HI points at
+; (decoded from the table above: slot0=$8BAF, slot1=$8BD4, slot2&4=$8C5B,
+; slot3&5=$8C5E, slot6=$8C90, slot7=$8CC2):
+;   - slot 0 (SLOT0_HERO_WATCH): watches HERO_STATE (slot 1) and transitions
+;     ITS OWN type to $08/$0A/$19/$1A accordingly - a hero-state-reactive
+;     companion/effect object (candidate: splash/dock/scripted-sequence
+;     visuals; not confirmed which).
+;   - slot 1 (MOVE_HERO): the hero/player car's own movement/state-machine
+;     logic - by far the most complex routine here.
+;   - slots 2 & 4 (SLOT_2_4_ENTRY/SLOT_3_5_ENTRY): react to ROAD_FEATURE
+;     $0E/$14 (icy-road/water-spawn features) and randomize VIC_SPRMC0 (the
+;     shared sprite multicolour register) - candidate: the icy-road/night
+;     sprite-recolour effect noted in claude/Ice_Road_And_Lap_Notes.md.
+;   - slot 6 (MOVE_BOAT_SLOT): sets STATE_4D05 to 5 or 6 based on
+;     SEQ_STATE/HERO_STATE/ANIM_STATE - CONFIRMED as the boat object: STATE_4D05
+;     is the exact "per-boat crash/special-sequence" flag traced from the
+;     other side in MOVE_TYPE_05_06 (claude/Collision_Detection_Notes.md).
+;   - slot 7 (MOVE_GUN_SLOT): the confirmed machine-gun/JOY1_FIRE_BTN check
+;     (see below) - CORRECTING last session's notes, which speculated this
+;     might be slot 6; it's slot 7. On a successful shot this slot's own
+;     type becomes commits to $1B - directly explaining MOVE_TYPE_1B
+;     (claude/Collision_Detection_Notes.md), previously unexplained.
+;
+; All five converge on a shared tail (COMMIT_TYPE) that commits the new
+; OBJ_TYPE and reinitialises the slot's sprite pointer, hit-group masks,
+; VIC sprite-multicolour/expand bits and X/Y position deltas from data
+; tables at $8EAC/$8EE4/$8F00/$8E90/$8EC8/$8E74 - those tables live in the
+; NEXT undissected block (after INIT_OBJECT_SLOT) and aren't decoded yet.
+;
+; Several BIT-absolute/zp "2-byte skip" multi-entry tricks (the same idiom
+; documented at HAZARD_CHECK_0C/0B/0A) are kept as raw bytes with labels at
+; each entry point, for the same reason as always: ca65 can't express two
+; different readings of the same bytes with ordinary mnemonics.
+;
+; Confirmed (this and a prior session): at GUN_CHECK_FIRE ($8CE0, LDA
+; JOY1_FIRE_BTN), joystick 1's own fire button gates a DEC of GUN_HEAT when
 ; HERO_STATE=$07 - the machine-gun fire trigger, paired with
 ; WEAPON_FIRE_INPUT/joystick 2 firing the special weapon instead (see the
 ; JOY_STATE equate comment near the top of this file, and
@@ -2652,47 +2692,362 @@ ALL_SLOTS_DONE:
     .byte $A8,$9A,$6D,$95,$02,$9B,$BE,$95,$B6,$9A,$EB,$95,$B9,$9A,$EB,$95
     .byte $2E,$8B,$24,$96,$2E,$8B,$6F,$96,$2E,$8B,$EC,$96,$2E,$8B,$24,$96
     .byte $A1,$9A,$1E,$97,$2E,$8B,$6B,$97,$2F,$9B,$A8,$97,$62,$9B,$FF,$94
-    .byte $A5,$A3,$C9,$07,$F0,$1A,$C9,$09,$F0,$13,$C9,$18,$F0,$0C,$A5,$A5
-    .byte $C9,$12,$F0,$03,$4C,$32,$8E,$A9,$1A,$2C,$A9,$19,$2C,$A9,$0A,$2C
-    .byte $A9,$08,$4C,$2D,$8D,$A5,$A2,$85,$08,$38,$66,$A2,$A9,$00,$85,$FB
-    .byte $A4,$49,$88,$F0,$17,$88,$F0,$54,$88,$88,$F0,$50,$88,$D0,$06,$A5
-    .byte $44,$C9,$14,$F0,$53,$A5,$08,$85,$A2,$4C,$32,$8E,$A5,$44,$C9,$13
-    .byte $F0,$06,$A5,$42,$C9,$11,$D0,$0A,$A9,$02,$20,$06,$A1,$A9,$64,$8D
-    .byte $10,$4D,$CE,$10,$4D,$D0,$DE,$EE,$10,$4D,$D0,$2F,$A5,$44,$C9,$0F
-    .byte $F0,$0C,$C9,$13,$B0,$CF,$A4,$FC,$F0,$04,$C6,$FC,$F0,$26,$C9,$02
-    .byte $90,$1F,$C9,$0E,$B0,$BF,$A5,$DD,$D0,$14,$F0,$B9,$AD,$17,$4D,$F0
-    .byte $DB,$30,$D9,$38,$6E,$17,$4D,$2C,$A9,$18,$2C,$A9,$00,$2C,$A9,$07
-    .byte $2C,$A9,$11,$2C,$A9,$09,$8D,$04,$4D,$4C,$2D,$8D,$A9,$0C,$2C,$A9
-    .byte $0D,$85,$08,$A5,$A8,$30,$27,$A0,$0E,$A5,$44,$C9,$0E,$F0,$0E,$C9
-    .byte $14,$F0,$0A,$20,$0E,$A1,$29,$03,$18,$65,$08,$D0,$0B,$A0,$0B,$E0
-    .byte $03,$F0,$03,$A9,$13,$2C,$A9,$12,$8C,$25,$D0,$4C,$2D,$8D,$4C,$32
-    .byte $8E,$A5,$49,$C9,$01,$F0,$15,$C9,$03,$F0,$20,$C9,$05,$D0,$0A,$A5
-    .byte $A3,$C9,$18,$D0,$04,$A5,$9B,$D0,$12,$4C,$32,$8E,$A5,$A3,$C9,$04
-    .byte $B0,$F7,$A5,$9B,$C9,$02,$D0,$F1,$A9,$05,$2C,$A9,$06,$8D,$05,$4D
-    .byte $4C,$2D,$8D,$A5,$49,$F0,$46,$C9,$05,$F0,$3F,$C9,$06,$F0,$41,$B0
-    .byte $42,$A5,$A3,$C9,$04,$B0,$0A,$A5,$9B,$C9,$02,$F0,$4C,$C9,$05,$F0
-    .byte $48,$AD,$0B,$4D,$F0,$24,$A5,$49,$C9,$02,$90,$1E,$C9,$05,$B0,$1A
-    .byte $A5,$A3,$C9,$07,$D0,$30,$A5,$F6,$F0,$2C,$A5,$C7,$30,$28,$A5,$C6
-    .byte $29,$7F,$C9,$46,$B0,$20,$C6,$F6,$90,$19,$4C,$32,$8E,$A9,$15,$2C
-    .byte $A9,$17,$2C,$A9,$16,$48,$A5,$49,$29,$04,$09,$01,$85,$49,$38,$66
-    .byte $A8,$68,$2C,$A9,$1B,$2C,$A9,$0B,$2C,$A9,$04,$2C,$A9,$14,$95,$A2
-    .byte $A8,$B9,$1C,$8F,$48,$29,$03,$0A,$9D,$43,$4D,$49,$FF,$18,$69,$02
-    .byte $9D,$3B,$4D,$68,$4A,$4A,$48,$F0,$02,$09,$FC,$9D,$4B,$4D,$68,$4A
-    .byte $4A,$F0,$02,$09,$F0,$9D,$53,$4D,$B9,$AC,$8E,$9D,$93,$4D,$B9,$E4
-    .byte $8E,$9D,$2B,$4D,$9D,$23,$4D,$B9,$00,$8F,$95,$9A,$B9,$90,$8E,$85
-    .byte $08,$29,$3F,$9D,$9B,$4D,$A5,$05,$06,$08,$90,$05,$0D,$1F,$4D,$D0
-    .byte $05,$49,$FF,$2D,$1F,$4D,$8D,$1F,$4D,$A5,$05,$06,$08,$90,$05,$0D
-    .byte $21,$4D,$D0,$05,$49,$FF,$2D,$21,$4D,$8D,$21,$4D,$B9,$C8,$8E,$85
-    .byte $08,$29,$0F,$9D,$27,$D0,$A5,$05,$06,$08,$B0,$05,$0D,$1C,$D0,$D0
-    .byte $05,$49,$FF,$2D,$1C,$D0,$8D,$1C,$D0,$A5,$05,$06,$08,$90,$05,$0D
-    .byte $1D,$D0,$D0,$05,$49,$FF,$2D,$1D,$D0,$8D,$1D,$D0,$A5,$05,$06,$08
-    .byte $90,$05,$0D,$17,$D0,$D0,$05,$49,$FF,$2D,$17,$D0,$8D,$17,$D0,$B9
-    .byte $74,$8E,$85,$08,$29,$0F,$9D,$A3,$4D,$A4,$07,$06,$08,$90,$0C,$06
-    .byte $08,$06,$08,$A5,$34,$C9,$03,$90,$0C,$B0,$13,$06,$08,$A9,$00,$90
-    .byte $13,$06,$08,$B0,$09,$20,$94,$89,$BD,$53,$4D,$4C,$13,$8E,$20,$88
-    .byte $89,$BD,$4B,$4D,$B0,$1D,$95,$B2,$A9,$00,$95,$AA,$9D,$33,$4D,$9D
-    .byte $5B,$4D,$9D,$8B,$4D,$9D,$83,$4D,$9D,$AB,$4D,$20,$DB,$99,$20,$5E
-    .byte $8E,$38,$60,$A4,$07
+SLOT0_HERO_WATCH:
+    lda HERO_STATE
+    cmp #$07
+    beq SLOT0_TYPE_08
+    cmp #$09
+    beq SLOT0_TYPE_0A
+    cmp #$18
+    beq SLOT0_TYPE_19
+    lda $A5
+    cmp #$12
+    beq SLOT0_TYPE_1A
+    jmp MOVE_BAIL
+SLOT0_TYPE_1A:
+    lda #$1A
+    .byte $2C
+SLOT0_TYPE_19:
+    .byte $A9,$19,$2C
+SLOT0_TYPE_0A:
+    .byte $A9,$0A,$2C
+SLOT0_TYPE_08:
+    .byte $A9,$08
+    jmp COMMIT_TYPE
+MOVE_HERO:
+    lda OBJ_TYPE
+    sta ZTMP_08
+    sec
+    ror OBJ_TYPE
+    lda #$00
+    sta FLAG_FB
+    ldy SEQ_STATE
+    dey
+    beq HERO_CHECK_ROAD_13
+    dey
+    beq HERO_CHECK_4D17
+    dey
+    dey
+    beq HERO_CHECK_4D17
+    dey
+    bne HERO_RESTORE_TYPE
+    lda ROAD_FEATURE
+    cmp #$14
+    beq SLOT1_SET_18
+HERO_RESTORE_TYPE:
+    lda ZTMP_08
+    sta OBJ_TYPE
+    jmp MOVE_BAIL
+HERO_CHECK_ROAD_13:
+    lda ROAD_FEATURE
+    cmp #$13
+    beq HERO_ARM_TIMER
+    lda ROAD_SEG_IDX
+    cmp #$11
+    bne HERO_COUNTDOWN
+HERO_ARM_TIMER:
+    lda #$02
+    jsr $A106
+    lda #$64
+    sta STATE_4D10
+HERO_COUNTDOWN:
+    dec STATE_4D10
+    bne HERO_RESTORE_TYPE
+    inc STATE_4D10
+    bne SLOT1_SET_00
+HERO_CHECK_ROAD_0F:
+    lda ROAD_FEATURE
+    cmp #$0F
+    beq HERO_CHECK_RANGE
+    cmp #$13
+    bcs HERO_RESTORE_TYPE
+    ldy FLAG_FC
+    beq HERO_CHECK_RANGE
+    dec FLAG_FC
+    beq SLOT1_SET_09
+HERO_CHECK_RANGE:
+    cmp #$02
+    bcc SLOT1_SET_11
+    cmp #$0E
+    bcs HERO_RESTORE_TYPE
+    lda FLAG_DD
+    bne SLOT1_SET_07
+    beq HERO_RESTORE_TYPE
+HERO_CHECK_4D17:
+    lda STATE_4D17
+    beq HERO_CHECK_ROAD_0F
+    bmi HERO_CHECK_ROAD_0F
+    sec
+    ror STATE_4D17
+    .byte $2C
+SLOT1_SET_18:
+    .byte $A9,$18,$2C
+SLOT1_SET_00:
+    .byte $A9,$00,$2C
+SLOT1_SET_07:
+    .byte $A9,$07,$2C
+SLOT1_SET_11:
+    .byte $A9,$11,$2C
+SLOT1_SET_09:
+    .byte $A9,$09
+    sta STATE_4D04
+    jmp COMMIT_TYPE
+SLOT_2_4_ENTRY:
+    lda #$0C
+    .byte $2C
+SLOT_3_5_ENTRY:
+    .byte $A9,$0D
+    sta ZTMP_08
+    lda SCENE_ID
+    bmi SLOT24_BAIL
+    ldy #$0E
+    lda ROAD_FEATURE
+    cmp #$0E
+    beq SLOT24_APPLY
+    cmp #$14
+    beq SLOT24_APPLY
+    jsr $A10E
+    and #$03
+    clc
+    adc ZTMP_08
+    bne SLOT24_SET_COLOR
+SLOT24_APPLY:
+    ldy #$0B
+    cpx #$03
+    beq SLOT24_TYPE_12
+    lda #$13
+    .byte $2C
+SLOT24_TYPE_12:
+    .byte $A9,$12
+SLOT24_SET_COLOR:
+    sty VIC_SPRMC0
+    jmp COMMIT_TYPE
+SLOT24_BAIL:
+    jmp MOVE_BAIL
+MOVE_BOAT_SLOT:
+    lda SEQ_STATE
+    cmp #$01
+    beq SLOT6_CHECK_ANIM
+    cmp #$03
+    beq SLOT6_STATE_06
+    cmp #$05
+    bne SLOT6_BAIL
+    lda HERO_STATE
+    cmp #$18
+    bne SLOT6_BAIL
+    lda STATE_9B
+    bne SLOT6_STATE_06
+SLOT6_BAIL:
+    jmp MOVE_BAIL
+SLOT6_CHECK_ANIM:
+    lda HERO_STATE
+    cmp #$04
+    bcs SLOT6_BAIL
+    lda STATE_9B
+    cmp #$02
+    bne SLOT6_BAIL
+    lda #$05
+    .byte $2C
+SLOT6_STATE_06:
+    .byte $A9,$06
+    sta STATE_4D05
+    jmp COMMIT_TYPE
+MOVE_GUN_SLOT:
+    lda SEQ_STATE
+    beq SLOT7_IDLE
+    cmp #$05
+    beq SLOT7_BAIL
+    cmp #$06
+    beq SLOT7_SET_17
+    bcs SLOT7_SET_16
+    lda HERO_STATE
+    cmp #$04
+    bcs GUN_CHECK_FIRE
+    lda STATE_9B
+    cmp #$02
+    beq TYPE_ANIM_BUSY
+    cmp #$05
+    beq TYPE_ANIM_BUSY
+GUN_CHECK_FIRE:
+    lda JOY1_FIRE_BTN
+    beq SLOT7_BAIL
+    lda SEQ_STATE
+    cmp #$02
+    bcc SLOT7_BAIL
+    cmp #$05
+    bcs SLOT7_BAIL
+    lda HERO_STATE
+    cmp #$07
+    bne TYPE_GUN_NOFIRE
+    lda GUN_HEAT
+    beq TYPE_GUN_NOFIRE
+    lda $C7
+    bmi TYPE_GUN_NOFIRE
+    lda $C6
+    and #$7F
+    cmp #$46
+    bcs TYPE_GUN_NOFIRE
+    dec GUN_HEAT
+    bcc TYPE_GUN_FIRED
+SLOT7_BAIL:
+    jmp MOVE_BAIL
+SLOT7_IDLE:
+    lda #$15
+    .byte $2C
+SLOT7_SET_17:
+    .byte $A9,$17,$2C
+SLOT7_SET_16:
+    .byte $A9,$16
+    pha
+    lda SEQ_STATE
+    and #$04
+    ora #$01
+    sta SEQ_STATE
+    sec
+    ror SCENE_ID
+    pla
+    .byte $2C
+TYPE_GUN_FIRED:
+    .byte $A9,$1B,$2C
+TYPE_GUN_NOFIRE:
+    .byte $A9,$0B,$2C
+TYPE_ANIM_BUSY:
+    .byte $A9,$04,$2C
+    .byte $A9,$14
+COMMIT_TYPE:
+    sta OBJ_TYPE,x
+    tay
+    lda $8F1C,y
+    pha
+    and #$03
+    asl
+    sta OBJ_TBL43,x
+    eor #$FF
+    clc
+    adc #$02
+    sta OBJ_TBL3B,x
+    pla
+    lsr
+    lsr
+    pha
+    beq COMMIT_YVEL_DONE
+    ora #$FC
+COMMIT_YVEL_DONE:
+    sta OBJ_TBL4B,x
+    pla
+    lsr
+    lsr
+    beq COMMIT_TYPE_CONT
+    ora #$F0
+COMMIT_TYPE_CONT:
+    sta OBJ_TBL53,x
+    lda $8EAC,y
+    sta OBJ_TBL93,x
+    lda $8EE4,y
+    sta SPRITE_PTRS,x
+    sta OBJ_TBL23,x
+    lda $8F00,y
+    sta OBJ_ANIM,x
+    lda $8E90,y
+    sta ZTMP_08
+    and #$3F
+    sta OBJ_TBL9B,x
+    lda BIT_MASK
+    asl ZTMP_08
+    bcc COMMIT_HITGROUP0_NEG
+    ora HIT_GROUP0
+    bne COMMIT_HITGROUP0_DONE
+COMMIT_HITGROUP0_NEG:
+    eor #$FF
+    and HIT_GROUP0
+COMMIT_HITGROUP0_DONE:
+    sta HIT_GROUP0
+    lda BIT_MASK
+    asl ZTMP_08
+    bcc COMMIT_HITGROUP2_NEG
+    ora HIT_GROUP2
+    bne COMMIT_HITGROUP2_DONE
+COMMIT_HITGROUP2_NEG:
+    eor #$FF
+    and HIT_GROUP2
+COMMIT_HITGROUP2_DONE:
+    sta HIT_GROUP2
+    lda $8EC8,y
+    sta ZTMP_08
+    and #$0F
+    sta VIC_SPR_COLOR,x
+    lda BIT_MASK
+    asl ZTMP_08
+    bcs COMMIT_SPRMCM_NEG
+    ora VIC_SPR_MCM
+    bne COMMIT_SPRMCM_DONE
+COMMIT_SPRMCM_NEG:
+    eor #$FF
+    and VIC_SPR_MCM
+COMMIT_SPRMCM_DONE:
+    sta VIC_SPR_MCM
+    lda BIT_MASK
+    asl ZTMP_08
+    bcc COMMIT_SPRXEXP_NEG
+    ora VIC_SPR_XEXP
+    bne COMMIT_SPRXEXP_DONE
+COMMIT_SPRXEXP_NEG:
+    eor #$FF
+    and VIC_SPR_XEXP
+COMMIT_SPRXEXP_DONE:
+    sta VIC_SPR_XEXP
+    lda BIT_MASK
+    asl ZTMP_08
+    bcc COMMIT_SPRYEXP_NEG
+    ora VIC_SPR_YEXP
+    bne COMMIT_SPRYEXP_DONE
+COMMIT_SPRYEXP_NEG:
+    eor #$FF
+    and VIC_SPR_YEXP
+COMMIT_SPRYEXP_DONE:
+    sta VIC_SPR_YEXP
+    lda $8E74,y
+    sta ZTMP_08
+    and #$0F
+    sta OBJ_TBLA3,x
+    ldy OBJ_IDX2
+    asl ZTMP_08
+    bcc COMMIT_DIR_CHECK2
+    asl ZTMP_08
+    asl ZTMP_08
+    lda SCROLL_SPEED
+    cmp #$03
+    bcc COMMIT_DIR_LEFT
+    bcs COMMIT_DIR_RIGHT
+COMMIT_DIR_CHECK2:
+    asl ZTMP_08
+    lda #$00
+    bcc COMMIT_APPLY_XVEL
+    asl ZTMP_08
+    bcs COMMIT_DIR_RIGHT
+COMMIT_DIR_LEFT:
+    jsr $8994
+    lda OBJ_TBL53,x
+    jmp COMMIT_APPLY_XVEL
+COMMIT_DIR_RIGHT:
+    jsr $8988
+    lda OBJ_TBL4B,x
+COMMIT_APPLY_XVEL:
+    bcs MOVE_BAIL
+    sta OBJ_POS_Y,x
+    lda #$00
+    sta OBJ_POS_X,x
+    sta OBJ_TBL33,x
+    sta OBJ_TBL5B,x
+    sta OBJ_TBL8B,x
+    sta STATE_4D83,x
+    sta OBJ_TBLAB,x
+    jsr $99DB
+    jsr $8E5E
+    sec
+    rts
+MOVE_BAIL:
+    ldy OBJ_IDX2
 
 ; -----------------------------------------------------------------------
 ; Clear moving-object slot X (Y = X*2, i.e. caller passes OBJ_IDX/OBJ_IDX2

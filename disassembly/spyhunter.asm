@@ -381,11 +381,20 @@ ANIM_STATE = $A9    ; sub-state / animation selector (???)
 OBJ_POS_X = $AA    ; per-slot world/scroll X position, pre-delta (???, tentative -
                      ;   8-byte stride matches the object-slot arrays; swapped
                      ;   between slots by the move handlers below)
+STEER_ACCUM = $B0    ; SPEEDCODE_IMAGE: steering accumulator, paired with
+                     ;   STEER_SUM (???, mirrors SPEED_ACCUM/SPEED_SUM below)
 OBJ_POS_Y = $B2    ; per-slot world/scroll Y position, paired with OBJ_POS_X (???)
+SPEED_ACCUM = $B8    ; SPEEDCODE_IMAGE: speed accumulator - decremented by
+                     ;   JOY_STATE (up), clamped to <=0, never observed
+                     ;   positive (???: exact game-feel meaning not confirmed)
 SPR_STAGE = $BA    ; staged hardware sprite coords
 SPR_X_SHADOW = $CA    ; sprite X shadow (->$D000)
 SPR_Y_SHADOW = $CB    ; sprite Y shadow
 SPAWN_Y = $CD    ; object spawn y (= sprite1 Y shadow; van vertical pos)
+STEER_SUM = $D6    ; SPEEDCODE_IMAGE: running sum feeding the steering
+                    ;   snap-to-target index (paired with STEER_ACCUM) (???)
+SPEED_SUM = $D7    ; SPEEDCODE_IMAGE: running sum feeding the SPEED_SET
+                    ;   snap-to-target index (paired with SPEED_ACCUM) (???)
 SPR_XMSB = $DA    ; sprite X bit-8 shadow (->$D010)
 RNG_SEED = $DB    ; PRNG seed
 SCORE_OVFL = $DC    ; score overflow / millions (???)
@@ -1917,17 +1926,142 @@ SRC_ROW_BORROW_DONE:
     jsr PTR_AUX_INC
     rts
 ; -----------------------------------------------------------------------
-; SPEEDCODE_IMAGE: a small 6502 routine kept here as data; run from $2800 RAM.
-    .byte $04,$03,$02,$01,$00,$A5,$33,$4A,$90,$07,$A4,$A8,$C0,$05,$F0,$01
-    .byte $4A,$A5,$B8,$90,$03,$ED,$09,$4D,$30,$02,$A9,$00,$C9,$F8,$10,$02
-    .byte $A9,$F8,$85,$B8,$18,$65,$35,$18,$65,$D7,$85,$D7,$4A,$4A,$4A,$4A
-    .byte $38,$E9,$08,$AA,$30,$0A,$E0,$05,$B0,$06,$BD,$F2,$86,$20,$06,$A1
-    .byte $C0,$06,$F0,$06,$A5,$FA,$C9,$02,$D0,$05,$A5,$33,$4A,$90,$2B,$A6
-    .byte $35,$F0,$25,$AC,$0A,$4D,$98,$18,$65,$B0,$AA,$30,$0E,$F0,$19,$C0
-    .byte $00,$F0,$14,$C5,$35,$90,$11,$F0,$0F,$B0,$0C,$C0,$00,$F0,$06,$65
-    .byte $35,$F0,$02,$10,$03,$E8,$E8,$CA,$86,$B0,$A5,$B0,$08,$18,$65,$D6
-    .byte $85,$D6,$B0,$05,$28,$30,$05,$10,$09,$28,$30,$06,$A5,$DA,$49,$40
-    .byte $85,$DA,$60
+; SPEEDCODE_IMAGE: a small routine kept here as its ROM master copy, copied
+; to and run from RAM at $2800 each frame (for consistent cycle timing, not
+; because it's about vehicle "speed" specifically - see the header's memory
+; map notes). Its own internal absolute references (SPEEDCODE_TBL, the
+; SPEED_SET call) still correctly point at these ROM addresses even when
+; executing from $2800, since 6502 absolute addressing doesn't care where
+; the executing code itself lives.
+;
+; This is the actual player-input-to-car-physics routine: it's the ONLY
+; place in the whole ROM that reads JOY_STATE (the decoded joystick/
+; keyboard input array, Stage 8) rather than just writing it, at both byte
+; 0 (speed, here) and byte 1 (steering, further down) - CONFIRMED by an
+; exhaustive search of every absolute reference to JOY_STATE in the
+; assembled ROM.
+;
+; Speed half: SPEED_ACCUM is a small accumulator, decremented by
+; JOY_STATE's speed delta (so pressing "up" - JOY_STATE=+1 - decreases it)
+; and clamped so it's never positive (0 or negative only). It's folded into
+; a running sum (SPEED_SUM, combined with ROAD_X_REF), which is then
+; divided by 16 and re-centred (-8) to produce a small index (0-4); when in
+; range, that index (via SPEEDCODE_TBL, which stores it REVERSED: 4,3,2,1,0)
+; is used to SNAP SCROLL_SPEED directly to a target value via SPEED_SET
+; (Stage 6) - i.e. this is a low-pass-filtered "ease toward a target scroll
+; speed" mechanism, not a direct 1:1 joystick-to-speed mapping. Gated by a
+; frame-parity/SCENE_ID check whose exact throttling logic isn't fully
+; interpreted. (???: whether "up" nets out to actually mean faster or
+; slower isn't confirmed from static analysis alone - would need a live
+; snapshot pair capturing SCROLL_SPEED change immediately after an up/down
+; press to settle it.)
+;
+; Steering half (STEER_GATE onward): the exact mirror of the above using
+; JOY_STATE+1 (steering delta), STEER_ACCUM and STEER_SUM in place of
+; SPEED_ACCUM/SPEED_SUM - but instead of snapping a value via a table, it
+; toggles bit 6 of SPR_XMSB (the sprite-X-MSB shadow) when STEER_SUM
+; overflows/goes negative, which reads as some kind of screen-position or
+; scroll-direction flip rather than literal sprite positioning. (???: not
+; fully interpreted.)
+SPEEDCODE_TBL:
+    .byte $04,$03,$02,$01,$00
+
+SPEEDCODE_IMAGE:
+    lda FRAME_CTR
+    lsr
+    bcc SPEED_ACCUM_ADJUST
+    ldy SCENE_ID
+    cpy #$05
+    beq SPEED_ACCUM_ADJUST
+    lsr
+SPEED_ACCUM_ADJUST:
+    lda SPEED_ACCUM
+    bcc SPEED_ACCUM_CLAMP
+    sbc JOY_STATE
+SPEED_ACCUM_CLAMP:
+    bmi SPEED_ACCUM_CLAMP2
+    lda #$00
+SPEED_ACCUM_CLAMP2:
+    cmp #$F8
+    bpl SPEED_ACCUM_DONE
+    lda #$F8
+SPEED_ACCUM_DONE:
+    sta SPEED_ACCUM
+    clc
+    adc ROAD_X_REF
+    clc
+    adc SPEED_SUM
+    sta SPEED_SUM
+    lsr
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #$08
+    tax
+    bmi SPEED_SNAP_CHECK
+    cpx #$05
+    bcs SPEED_SNAP_CHECK
+    lda SPEEDCODE_TBL,x
+    jsr SPEED_SET
+SPEED_SNAP_CHECK:
+    cpy #$06
+    beq STEER_GATE
+    lda ROAD_PHASE
+    cmp #$02
+    bne STEER_ACCUM_ADJUST
+STEER_GATE:
+    lda FRAME_CTR
+    lsr
+    bcc STEER_SNAP_CHECK
+STEER_ACCUM_ADJUST:
+    ldx ROAD_X_REF
+    beq STEER_ACCUM_DONE
+    ldy JOY_STATE+1
+    tya
+    clc
+    adc STEER_ACCUM
+    tax
+    bmi STEER_ACCUM_NEG
+    beq STEER_ACCUM_DONE
+    cpy #$00
+    beq STEER_ACCUM_DEC
+    cmp ROAD_X_REF
+    bcc STEER_ACCUM_DONE
+    beq STEER_ACCUM_DONE
+    bcs STEER_ACCUM_DEC
+STEER_ACCUM_NEG:
+    cpy #$00
+    beq STEER_ACCUM_INC
+    adc ROAD_X_REF
+    beq STEER_ACCUM_INC
+    bpl STEER_ACCUM_DONE
+STEER_ACCUM_INC:
+    inx
+    inx
+STEER_ACCUM_DEC:
+    dex
+STEER_ACCUM_DONE:
+    stx STEER_ACCUM
+STEER_SNAP_CHECK:
+    lda STEER_ACCUM
+    php
+    clc
+    adc STEER_SUM
+    sta STEER_SUM
+    bcs XMSB_TOGGLE_CHECK
+    plp
+    bmi XMSB_TOGGLE
+    bpl SPEEDCODE_DONE
+XMSB_TOGGLE_CHECK:
+    plp
+    bmi SPEEDCODE_DONE
+XMSB_TOGGLE:
+    lda SPR_XMSB
+    eor #$40
+    sta SPR_XMSB
+SPEEDCODE_DONE:
+    rts
 
 ; -----------------------------------------------------------------------
 ; Decompress a custom multicolour character set from a compressed byte-
@@ -4643,17 +4777,19 @@ MAP_COPY_BLOCK_DONE:
 ; throttled by a caller-supplied frame-counter bitmask - now fully
 ; converted to labelled instructions (previously "small mirror/fill helper
 ; fragment stored as data", a guessed name that doesn't match what this
-; code actually does). No confirmed caller yet (likely lives in one of the
-; still-undissected blocks), but the BIT-absolute/zp "2-byte skip" overlap
-; entries below match the same multi-entry idiom used throughout this file
-; (e.g. HAZARD_CHECK_0C/0B/0A), strongly suggesting two real entry points:
+; code actually does). Three real entry points, confirmed by tracing actual
+; callers (SPEEDCODE_IMAGE and the hero/object move-handler block):
 ;   - SPEED_STEP_DOWN (fallthrough): A=-1 (decelerate)
-;   - SPEED_STEP_UP (direct entry): A=+1 (accelerate)
+;   - SPEED_STEP_UP (overlap entry): A=+1 (accelerate) - called from the
+;     hero/object move-handler block (Stage 5, still undissected)
+;   - SPEED_SET (overlap entry, mid-routine): skips the throttle/clamp
+;     entirely and stores whatever's in A straight to SCROLL_SPEED/
+;     ROAD_X_REF - called from SPEEDCODE_IMAGE with a precomputed target
+;     value (Stage 6).
 ; Y (saved to ZTMP_08) is presumably a period bitmask - the routine only
 ; commits the change when FRAME_CTR AND that mask is zero, i.e. once every
 ; N frames - then bails without applying if the result would go negative or
-; reach 5 (keeping SCROLL_SPEED in the range 0-4). (???: no confirmed caller
-; or precise meaning of ROAD_X_REF's role here.)
+; reach 5 (keeping SCROLL_SPEED in the range 0-4).
 SPEED_STEP_DOWN:
     lda #$FF
     .byte $2C
@@ -4670,6 +4806,7 @@ SPEED_STEP_UP:
     and ZTMP_08
     bne SPEED_STEP_SKIP
     pla
+SPEED_SET:
     sta SCROLL_SPEED
     asl
     sta ROAD_X_REF

@@ -152,6 +152,35 @@ short version, correcting this doc's earlier speculation:
   previously unexplained ("(???)" in that doc). `$1B` is the "live bullet"
   object type.
 
+## Update (second follow-up session): where JOY_STATE actually drives car physics
+
+User hypothesis: `SPEED_STEP_UP/DOWN` (a small routine found and converted
+while looking for `SCROLL_SPEED`-adjusting code - see its comment header in
+`disassembly/spyhunter.asm`) responds directly to joystick up/down.
+Investigated by searching every reference to `$DC00`/`$DC01` and to
+`JOY_STATE` in the assembled ROM:
+
+* **No other raw `$DC00`/`$DC01` read exists anywhere** - only inside the
+  already-converted `READ_DUAL_JOYSTICK_INPUT` and `SCAN_JOY_KEYS` (the
+  latter is also how keyboard "I"/"K" would come in, via `KEYCODE_TBL` -
+  both control schemes feed the same `JOY_STATE` array).
+* **`JOY_STATE` (byte 0, speed) is read in exactly one place in the whole
+  ROM**: `SPEEDCODE_IMAGE` (`$86F2`-`$8784`, now fully converted - see
+  `claude/SpeedCode_Notes.md`). This is THE player-input-to-car-physics
+  routine, not `SPEED_STEP_UP/DOWN` - it feeds a low-pass-filtered
+  accumulator that eventually calls a third, previously-missed entry point
+  into `SPEED_STEP` (`SPEED_SET`, at `$A106`) to snap `SCROLL_SPEED` to a
+  target value once the accumulator crosses a threshold.
+* `SPEED_STEP_UP` turned out to be called from `SPEEDCODE_IMAGE` too (not
+  found last session's search); `SPEED_STEP_DOWN`'s other two callers
+  (inside the still-undissected block after `INIT_OBJECT_SLOT`, task #25)
+  remain more likely automatic/terrain-triggered deceleration than direct
+  input.
+* Whether pressing "up" nets out to actually mean faster or slower isn't
+  settled by static analysis alone (the accumulator math is a few
+  indirection steps removed from a direct mapping) - would need a live
+  snapshot pair to confirm.
+
 ## Still open
 
 * The exact demo-AI logic in `ATTRACT_AUTODRIVE` (what `OBJ_TBL69`/`OBJ_TBL71`

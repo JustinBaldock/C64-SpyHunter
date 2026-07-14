@@ -445,16 +445,44 @@ STATE_4D05 = $4D05
 NEXT_LIFE_SCORE = $4D06    ; next extra-life threshold
 STATE_4D07 = $4D07
 STATE_4D08 = $4D08
-JOY_STATE = $4D09    ; decoded joystick state
-STATE_4D0C = $4D0C
+; JOY_STATE: 4-byte decoded-input array, written EITHER by
+; READ_DUAL_JOYSTICK_INPUT or by DECODE_JOY_LOOP (Stage 8) depending on
+; CONTROL_SCHEME below, so the rest of the game reads it the same way
+; regardless of which control method produced it:
+;   [0] JOY_STATE   - speed delta: joystick 1 up=+1 (accelerate), down=-1 (brake)
+;   [1] JOY_STATE+1 - steering delta: joystick 1 right=+1, left=-1
+;   [2] JOY1_FIRE_BTN ($4D0B) - joystick 1's own fire button (not seen read
+;       elsewhere in the annotated code yet)
+;   [3] WEAPON_FIRE_INPUT ($4D0C) - joystick PORT 2's fire button, read
+;       directly (not via the port-1 steering decode) - this is what
+;       UPDATE_WEAPONS (Stage 6) checks to fire the current weapon.
+; CONFIRMED (user-reported, verified by tracing READ_DUAL_JOYSTICK_INPUT
+; below): Spy Hunter is single-player only, but does read a SECOND
+; joystick port - its fire button, and only its fire button, triggers
+; weapons. This has nothing to do with CONTROL_SCHEME/DIFFICULTY_MODE below,
+; which were previously (incorrectly) named as if they were a 2-player mode.
+JOY_STATE = $4D09    ; decoded joystick/keyboard input (see above)
+JOY1_FIRE_BTN = $4D0B    ; joystick 1's own fire button (???: not read elsewhere yet)
+WEAPON_FIRE_INPUT = $4D0C    ; joystick 2's fire button - fires the current weapon
 IRQ_HALF = $4D0D    ; IRQ top/bottom toggle
 FRAME_SUBCTR = $4D0F    ; frame sub-counter
 STATE_4D10 = $4D10
-NUM_PLAYERS = $4D11    ; 1 or 2 players
+; CONTROL_SCHEME: an input-METHOD choice, NOT a player count - confirmed by
+; tracing its two dispatch targets (Stage 2's INIT_PLAY_STATE): 1 selects
+; READ_DUAL_JOYSTICK_INPUT (joystick 1 steers, joystick 2 fires), 2 selects
+; CONTROL_KEYBOARD_ENTRY (the keyboard-matrix decoder, SCAN_JOY_KEYS/
+; DECODE_JOY_LOOP, Stage 8) - i.e. "play with two joysticks" vs. "play with
+; the keyboard". This game has no two-player mode.
+CONTROL_SCHEME = $4D11    ; 1=dual joystick, 2=keyboard (was wrongly named NUM_PLAYERS)
 EXTRA_LIFE_AVAIL = $4D12    ; timer-expired flag: $00 running(timer shown),
                             ;   $FF expired (DRAW_STATUS_PANEL shows lives, hides timer)
 GAME_STATE = $4D13    ; game state machine
-TWO_PLAYER = $4D14    ; 2-player flag
+; DIFFICULTY_MODE: CONFIRMED Novice(1)/Expert(2) difficulty select, NOT a
+; 2-player flag - ADD_SCORE (Stage 9-adjacent) adds this value directly to
+; NEXT_LIFE_SCORE (a BCD ten-thousands-digit counter), giving +10,000/life
+; in Novice vs +20,000/life in Expert - an exact match to the manual's
+; documented figures (claude/Enemy_Agents_Manual_Reference.md).
+DIFFICULTY_MODE = $4D14    ; 1=Novice, 2=Expert (was wrongly named TWO_PLAYER)
 LIVES = $4D15    ; player lives
 STATE_4D16 = $4D16
 STATE_4D17 = $4D17
@@ -642,7 +670,7 @@ MAIN_RUN_ATTRACT:
     jsr ATTRACT_TITLE   ; show the title screen until a key/coin advances it
 
 MAIN_RUN_MENU:
-    jsr ATTRACT_MENU    ; show the menu (player count etc.) until START is hit
+    jsr ATTRACT_MENU    ; show the menu (control scheme, difficulty) until START is hit
 
 MAIN_RUN_PLAY:
     jsr INIT_PLAY_STATE     ; reset score/lives/road/etc. for a fresh game
@@ -679,21 +707,22 @@ GAME_LOOP:
     beq ATTRACT_LOOP_CHECK  ; nothing pressed and nothing held -> just loop
 
 ; A key/joystick input was seen (or START_HELD was already counting) - track
-; how long it's been held, and once a player count is chosen, start playing.
+; how long it's been held, and once both menu choices (control scheme,
+; difficulty) have been made, start playing.
 START_OR_SELECT_PRESSED:
     inc START_HELD
-    lda NUM_PLAYERS
-    beq GOTO_PLAYER_SELECT  ; no player count chosen yet -> go pick one
-    lda TWO_PLAYER
-    beq GOTO_PLAYER_SELECT  ; (???) same check again on the 2-player flag
-    sta GAME_STATE          ; otherwise commit to playing (A = TWO_PLAYER here)
+    lda CONTROL_SCHEME
+    beq GOTO_MENU_SELECT  ; no control scheme chosen yet -> go pick one
+    lda DIFFICULTY_MODE
+    beq GOTO_MENU_SELECT  ; no difficulty chosen yet either -> same menu
+    sta GAME_STATE          ; otherwise commit to playing (A = DIFFICULTY_MODE here)
 
 ; Reached every frame once GAME_STATE is nonzero (i.e. once actually playing).
 ; Its job is to notice "game over" and, after a short wait, either restart
 ; the game (if the player presses something) or fall back to attract mode.
 ATTRACT_LOOP_CHECK:
     lda DEMO_TIMER
-    bne GOTO_PLAYER_SELECT  ; demo/attract countdown still running
+    bne GOTO_MENU_SELECT  ; demo/attract countdown still running
     lda START_HELD
     bne BEGIN_PLAY          ; START is being held down -> (re)start immediately
     lda LIVES
@@ -739,12 +768,12 @@ BEGIN_PLAY:
     jsr RESET_ROAD_INDEX
     jmp MAIN_RUN_PLAY            ; start (or restart) a game from the top
 
-GOTO_PLAYER_SELECT:
+GOTO_MENU_SELECT:
     lda #$01
     sta GAME_STATE
     jsr RESET_ROAD_INDEX_ALT
     inc SCENE_IDX
-    jmp MAIN_RUN_MENU             ; go show the player-count menu
+    jmp MAIN_RUN_MENU             ; go show the control-scheme/difficulty menu
 
 ; -----------------------------------------------------------------------
 ; Enter the current game-state handler via VEC_STATE ($2895). VEC_STATE is
@@ -1004,18 +1033,29 @@ TITLE_SET_GAME_STATE:
     sta GAME_STATE           ; GAME_STATE = whatever POLL_INPUT_FRAME returned
     rts
 ; -----------------------------------------------------------------------
-; MENU_MSG_TBL / MENU_MSG_TBL_B: char-codes for the player-select / demo screen.
+; MENU_MSG_TBL / MENU_MSG_TBL_B: char-codes for the control-scheme/difficulty
+; select screen (previously mislabelled "player-select" - see below).
     .byte $28,$24,$0A,$20,$30,$0A,$40,$24,$1E,$40,$0A,$06,$12,$2C,$1E,$1C
     .byte $0A,$24,$1E,$06,$26,$40,$10,$0E,$12,$10
 
 ; -----------------------------------------------------------------------
-; Player-select / demo screen: like ATTRACT_TITLE, this runs once per pass
-; through the boot-order chain, not in an internal wait-loop (see the note
-; above ATTRACT_TITLE). Two sequential single-poll prompts: first "how many
-; players", then a second "which game/start option" choice. The exact key
+; Control-scheme / difficulty select screen: like ATTRACT_TITLE, this runs
+; once per pass through the boot-order chain, not in an internal wait-loop
+; (see the note above ATTRACT_TITLE). Two sequential single-poll prompts:
+; first "how to play" (CONTROL_SCHEME: dual joystick vs. keyboard), then
+; "which difficulty" (DIFFICULTY_MODE: Novice vs. Expert). The exact key
 ; codes compared against ($1D/$1A/$18/$31) are POLL_INPUT_FRAME's raw
 ; decoded-input values - see SCAN_JOY_KEYS/KEYCODE_TBL in a later section for
 ; how those are produced; not cross-checked here. (???)
+;
+; NOTE: this pair of prompts was previously mislabelled as a "how many
+; players" / player-count select - CONFIRMED wrong (user-reported): Spy
+; Hunter is single-player only. The first prompt selects an INPUT method
+; (CONTROL_SCHEME - see READ_DUAL_JOYSTICK_INPUT, Stage 8, for where the
+; game reads a second joystick port's fire button for weapons, unrelated to
+; player count); the second selects DIFFICULTY_MODE (Novice/Expert),
+; confirmed by its exact effect on the extra-life score threshold in
+; ADD_SCORE matching the manual's 10,000/20,000-point figures exactly.
 ATTRACT_MENU:
     jsr RESET_SCREEN_STATE
     lda GAME_STATE
@@ -1024,33 +1064,33 @@ ATTRACT_MENU:
     ldx #$14
     ldy #$09            ; 10 entries in MENU_MSG_TBL_B
 
-DRAW_PLAYERS_PROMPT_LOOP:
+DRAW_CONTROL_PROMPT_LOOP:
     lda MENU_MSG_TBL_B,y
     jsr PANEL_PUT_CHAR_PAIR
     dey
-    bpl DRAW_PLAYERS_PROMPT_LOOP
+    bpl DRAW_CONTROL_PROMPT_LOOP
     jsr DRAW_SCORE
 
-POLL_PLAYERS_CHOICE:
+POLL_CONTROL_CHOICE:
     jsr POLL_INPUT_FRAME
     beq MENU_ABORT       ; no input this frame -> bail
     ldx #$01
     ldy #$11
     cmp #$1D
-    beq PLAYERS_CHOSEN   ; input $1D -> 1 player (X stays 1)
+    beq CONTROL_SCHEME_CHOSEN   ; input $1D -> dual joystick (X stays 1)
     inx                  ; X=2
     ldy #$1D
     cmp #$1A
-    bne POLL_PLAYERS_CHOICE  ; not $1A either -> keep polling next frame
+    bne POLL_CONTROL_CHOICE  ; not $1A either -> keep polling next frame
 
-PLAYERS_CHOSEN:
-    stx NUM_PLAYERS      ; NUM_PLAYERS = 1 or 2
+CONTROL_SCHEME_CHOSEN:
+    stx CONTROL_SCHEME    ; CONTROL_SCHEME = 1 (joystick) or 2 (keyboard)
     ldx #$12
     lda #$00
 
 ; Clear a block of rows across all 6 play/high-score screen-buffer areas
 ; (play buffer x3 + high-score buffer x3, see the SCR_PLAY_*/SCR_HISC_*
-; equates) to erase the "how many players" prompt before the next one.
+; equates) to erase the control-scheme prompt before the next one.
 CLEAR_MENU_ROWS_LOOP:
     sta SCR_PLAY_0D,y
     sta SCR_PLAY_35,y
@@ -1065,33 +1105,33 @@ CLEAR_MENU_ROWS_LOOP:
     ldx #$04
     ldy #$0F            ; 16 entries in MENU_MSG_TBL
 
-DRAW_GAME_PROMPT_LOOP:
+DRAW_DIFFICULTY_PROMPT_LOOP:
     lda MENU_MSG_TBL,y
     jsr PANEL_PUT_CHAR_PAIR
     dey
-    bpl DRAW_GAME_PROMPT_LOOP
+    bpl DRAW_DIFFICULTY_PROMPT_LOOP
 
-POLL_GAME_CHOICE:
+POLL_DIFFICULTY_CHOICE:
     jsr POLL_INPUT_FRAME
     beq MENU_ABORT
     ldy #$01
     cmp #$18
-    beq GAME_CHOICE_MADE  ; input $18 -> choice 1 (Y stays 1)
+    beq DIFFICULTY_CHOSEN  ; input $18 -> Novice (Y stays 1)
     cmp #$31
-    bne POLL_GAME_CHOICE   ; not $31 either -> keep polling
-    iny                     ; input $31 -> choice 2 (Y=2)
+    bne POLL_DIFFICULTY_CHOICE   ; not $31 either -> keep polling
+    iny                     ; input $31 -> Expert (Y=2)
 
-GAME_CHOICE_MADE:
+DIFFICULTY_CHOSEN:
     sty GAME_STATE
-    sty TWO_PLAYER          ; (???) both set to the same 1/2 choice value
+    sty DIFFICULTY_MODE     ; both set to the same 1(Novice)/2(Expert) value
     dey
-    beq MENU_DONE_1P        ; choice was 1 -> clear the panel's right half
-    jmp CLEAR_PANEL_FULL     ; choice was 2 -> clear its left half instead
+    beq MENU_DONE_NOVICE     ; Novice chosen -> clear the panel's right half
+    jmp CLEAR_PANEL_FULL     ; Expert chosen -> clear its left half instead
                               ;   (CLEAR_PANEL_FULL's second entry point,
                               ;   see the CLEAR_PANEL/CLEAR_PANEL_ALT note
                               ;   near WAIT_FRAME_TIMER)
 
-MENU_DONE_1P:
+MENU_DONE_NOVICE:
     jmp CLEAR_PANEL_ALT
 
 MENU_ABORT:
@@ -1108,7 +1148,7 @@ INIT_PLAY_STATE:
     jsr DELAY_FRAMES_ALT
     ldx GAME_STATE
     beq INIT_PLAY_MUX
-    ldx TWO_PLAYER
+    ldx DIFFICULTY_MODE
     cpx #$01
     beq INIT_PLAY_MUX
     ldy #$FF
@@ -1149,8 +1189,11 @@ INIT_PLAY_MUX:
     stx STATE_4D05
     stx STATE_4DCB
     inx                 ; x = $02
-    stx NEXT_LIFE_SCORE ; (???) likely an index into a score-threshold table
-                        ;   rather than a raw score value
+    stx NEXT_LIFE_SCORE ; CONFIRMED: a BCD ten-thousands-digit score threshold
+                        ;   (2 = 20,000 points), not an index - ADD_SCORE later
+                        ;   adds DIFFICULTY_MODE (1 or 2) to it directly,
+                        ;   matching the manual's Novice(+10,000)/
+                        ;   Expert(+20,000) extra-life figures exactly.
     stx MUX_SLOT_IDX
     lda #$0E
     sta VIC_SPRMC0      ; shared sprite colour 1: light blue
@@ -1159,22 +1202,24 @@ INIT_PLAY_MUX:
 
 ; Pick which game-state handler VEC_STATE should dispatch to (via
 ; GAME_DISPATCH, every frame) for the game that's about to start - one of
-; three addresses depending on GAME_STATE/NUM_PLAYERS. $A189/$A152 aren't
-; covered by this annotation pass; $A9F6 is STATE_2P_ENTRY (Stage 8, near
-; SCAN_JOY_KEYS) - a 2-player-specific input-decode entry point. (???: the
-; other two handlers' roles)
+; three addresses depending on GAME_STATE/CONTROL_SCHEME. $A189 (attract
+; auto-drive) and $A9F6 (CONTROL_KEYBOARD_ENTRY, Stage 8, near
+; SCAN_JOY_KEYS - the keyboard-matrix input decoder) aren't covered by this
+; annotation pass; $A152 is READ_DUAL_JOYSTICK_INPUT (Stage 8) - CONFIRMED
+; this dispatch is an input CONTROL METHOD choice (joystick vs. keyboard),
+; NOT a player count (there is no 2-player mode in this game).
     lda #$89
     ldy #$A1
     ldx GAME_STATE
     beq SET_STATE_VEC        ; GAME_STATE=0 (attract) -> $A189
-    ldx NUM_PLAYERS
+    ldx CONTROL_SCHEME
     dex
-    beq ONE_PLAYER_VEC       ; NUM_PLAYERS=1 -> $A152
+    beq JOYSTICK_CONTROL_VEC ; CONTROL_SCHEME=1 -> $A152 (dual joystick)
     lda #$F6
     ldy #$A9
-    bne SET_STATE_VEC         ; NUM_PLAYERS=2 -> $A9F6 (STATE_2P_ENTRY)
+    bne SET_STATE_VEC         ; CONTROL_SCHEME=2 -> $A9F6 (keyboard)
 
-ONE_PLAYER_VEC:
+JOYSTICK_CONTROL_VEC:
     lda #$52
     ldy #$A1
 
@@ -4306,14 +4351,100 @@ PACK_2BITS_LOOP:
     bne PACK_2BITS_LOOP
     rts
 ; -----------------------------------------------------------------------
-; Joystick / keyboard decode helper code and tables (feeds JOY_STATE), as data.
-    .byte $AD,$01,$DC,$49,$FF,$AA,$A0,$00,$29,$03,$F0,$06,$4A,$90,$02,$C8
-    .byte $24,$88,$8C,$09,$4D,$8A,$29,$10,$8D,$0B,$4D,$8A,$A0,$00,$29,$0C
-    .byte $F0,$07,$C9,$08,$F0,$02,$88,$24,$C8,$8C,$0A,$4D,$AD,$00,$DC,$49
-    .byte $FF,$29,$10,$8D,$0C,$4D,$60,$20,$0E,$A1,$29,$03,$8D,$0B,$4D,$A9
-    .byte $00,$A8,$AA,$CD,$71,$4D,$D0,$0C,$CD,$69,$4D,$D0,$05,$20,$0E,$A1
-    .byte $10,$02,$C8,$C8,$88,$8C,$0A,$4D,$C5,$34,$F0,$07,$20,$0E,$A1,$30
-    .byte $02,$CA,$CA,$E8,$8E,$09,$4D,$60
+; READ_DUAL_JOYSTICK_INPUT: the CONTROL_SCHEME=1 ("joystick") input decoder,
+; set up as a dispatch-vector target above (JOYSTICK_CONTROL_VEC, Stage 2).
+; Previously left as raw undissected data under a "player-count" framing;
+; now fully traced and CONFIRMED (user-reported, verified here): this game
+; is single-player only, but reads a SECOND joystick port - port 2's fire
+; button, and ONLY its fire button, fires the current weapon (see
+; WEAPON_FIRE_INPUT/UPDATE_WEAPONS, Stage 6). Steering and joystick 1's own
+; fire button are decoded from port 1 first, into the same JOY_STATE array
+; the keyboard control scheme (CONTROL_KEYBOARD_ENTRY, below) also writes.
+READ_DUAL_JOYSTICK_INPUT:
+    lda CIA1_PRB         ; joystick port 1: up/down/left/right/fire (active-low)
+    eor #$FF              ; invert so pressed bits read as 1
+    tax                   ; keep the full inverted port-1 state in X
+    ldy #$00
+    and #$03              ; bits 0-1: up/down
+    beq JOY1_VERT_DONE     ; neither -> vertical delta stays 0
+    lsr a                 ; bit0 (up) into carry
+    bcc JOY1_VERT_DOWN     ; carry clear -> down was the one pressed
+    iny                    ; up -> delta = +1 (accelerate)
+; Overlap: falling through here runs a no-op "bit $88" before storing;
+; branching directly to JOY1_VERT_DOWN instead re-reads that same byte
+; fresh as "dey" (delta = -1, brake) - the classic "BIT-absolute/zp as a
+; 2-byte skip, reinterpreted when entered mid-instruction" idiom used
+; throughout this file (e.g. HAZARD_CHECK_0C/0B/0A in the collision code).
+    .byte $24
+JOY1_VERT_DOWN:
+    .byte $88
+JOY1_VERT_DONE:
+    sty JOY_STATE          ; JOY_STATE[0] = speed delta: +1 up, -1 down, 0 neither
+    txa
+    and #$10               ; joystick 1's own fire button
+    sta JOY1_FIRE_BTN
+    txa
+    ldy #$00
+    and #$0C               ; bits 2-3: left/right
+    beq JOY1_HORIZ_DONE     ; neither -> horizontal delta stays 0
+    cmp #$08                ; exactly "right" bit pattern?
+    beq JOY1_HORIZ_RIGHT
+    dey                     ; not right (so left) -> delta = -1
+; Same overlap idiom as above: falling through runs a no-op "bit $C8";
+; entering directly at JOY1_HORIZ_RIGHT instead reads that byte fresh as
+; "iny" (delta = +1, right).
+    .byte $24
+JOY1_HORIZ_RIGHT:
+    .byte $C8
+JOY1_HORIZ_DONE:
+    sty JOY_STATE+1         ; JOY_STATE[1] = steering delta: +1 right, -1 left
+; CONFIRMED: joystick port 2 is read here directly (not through the port-1
+; decode above), keeping only its fire-button bit - this is exactly the
+; input UPDATE_WEAPONS (Stage 6) checks before firing the current weapon.
+    lda CIA1_PRA            ; joystick port 2
+    eor #$FF
+    and #$10                ; fire button only
+    sta WEAPON_FIRE_INPUT
+    rts
+
+; -----------------------------------------------------------------------
+; Attract-mode auto-drive: generates pseudo-random steering/speed deltas
+; into the same JOY_STATE slots the real input routines use (so the rest of
+; the game can't tell the difference), for the demo car shown while the
+; title/menu screens cycle. This is the $A189 handler referenced above
+; (GAME_STATE=0 dispatch target) - not part of the control-scheme question,
+; but sits in the same data block and is now fully traced too. Uses
+; RNG_NEXT for randomness and reads OBJ_TBL69/OBJ_TBL71 (slot 0, unindexed)
+; and SCROLL_SPEED as pacing/decision inputs (???: exact demo-AI logic).
+ATTRACT_AUTODRIVE:
+    jsr RNG_NEXT
+    and #$03
+    sta JOY1_FIRE_BTN        ; (reused as scratch/output here, not a real fire press)
+    lda #$00
+    tay
+    tax
+    cmp OBJ_TBL71            ; (???) slot 0's hazard/state byte, read bare
+    bne AUTODRIVE_HORIZ_A
+    cmp OBJ_TBL69
+    bne AUTODRIVE_HORIZ_B
+    jsr RNG_NEXT
+    bpl AUTODRIVE_HORIZ_A
+AUTODRIVE_HORIZ_B:
+    iny
+    iny
+AUTODRIVE_HORIZ_A:
+    dey
+    sty JOY_STATE+1
+    cmp SCROLL_SPEED         ; (???) reused as a pacing check in this context
+    beq AUTODRIVE_VERT_DONE
+    jsr RNG_NEXT
+    bmi AUTODRIVE_VERT_DONE
+    dex
+    dex
+AUTODRIVE_VERT_DONE:
+    inx
+    stx JOY_STATE
+    rts
 
 ; -----------------------------------------------------------------------
 ; Charset builder: emit ZTMP_0C characters, each 8 bytes read from the
@@ -4815,13 +4946,16 @@ WIDEN_EDGE_NEXT:
 ; via DRAW_OBJECT_TILES, colour $09; blit col/row from STATE_4DB9 / STATE_4DC1.
 ; Fully traced structure: skip entirely while a blit is still in progress
 ; (BLIT_ROWS nonzero, i.e. DRAW_OBJECT_TILES hasn't finished last frame's
-; shape yet); otherwise either toggle the requested weapon (STATE_4D0C=0
-; path) or fire whichever of smoke/missile is currently selected and has
-; ammo (STATE_4D0C nonzero path).
+; shape yet); otherwise either toggle the requested weapon
+; (WEAPON_FIRE_INPUT=0 path) or fire whichever of smoke/missile is
+; currently selected and has ammo (WEAPON_FIRE_INPUT nonzero path).
+; WEAPON_FIRE_INPUT is joystick PORT 2's fire button - CONFIRMED (user-
+; reported): this single-player game reads a second joystick port purely to
+; fire weapons; see READ_DUAL_JOYSTICK_INPUT, Stage 8.
 UPDATE_WEAPONS:
     lda BLIT_ROWS
     bne WEAPONS_DONE
-    lda STATE_4D0C
+    lda WEAPON_FIRE_INPUT
     bne WEAPON_FIRE_ENTRY
     sta BLIT_FLAGS
     lda WEAPON_STATE
@@ -5301,7 +5435,11 @@ LA8DD:
     bcc LA8FB
     clc
     lda NEXT_LIFE_SCORE
-    adc TWO_PLAYER
+; CONFIRMS DIFFICULTY_MODE: this BCD-add advances the extra-life threshold
+; by 1 (Novice, so +10,000 points - this byte is the score's ten-thousands
+; digit) or 2 (Expert, so +20,000 points) - an exact match to the manual's
+; figures. Definitively not a "2-player" value.
+    adc DIFFICULTY_MODE
     sta NEXT_LIFE_SCORE
     ldx LIVES
     cpx #$06
@@ -5567,8 +5705,14 @@ NOTHING_PRESSED:
                         ;   below is unreachable from here; it's a SEPARATE
                         ;   entry point, reached only via VEC_STATE (see
                         ;   SET_STATE_VEC, Stage 2: this is the $A9F6 handler
-                        ;   selected for 2-player games)
-STATE_2P_ENTRY:
+                        ;   selected when CONTROL_SCHEME=2, i.e. keyboard
+                        ;   control - NOT a "2-player" mode; this game is
+                        ;   single-player only (see READ_DUAL_JOYSTICK_INPUT,
+                        ;   Stage 8, for the joystick control scheme, which
+                        ;   reads a second joystick port's fire button for
+                        ;   weapons - the actual source of the old "2-player"
+                        ;   mislabelling)
+CONTROL_KEYBOARD_ENTRY:
     lda #$00
     ldx #$03
 

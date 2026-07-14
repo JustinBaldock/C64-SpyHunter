@@ -147,13 +147,14 @@ code at `PAINT_AND_ARM_MUX`. This is most likely what schedules the extra multip
 enemy-boat sprites specifically at the river's entry and exit bands, rather than a purely visual
 flash.
 
-## Open item: does crashing into water cost a life?
+## Resolved: does crashing into water cost a life?
 
-`become-boat` has `LIVES $4D15=$00`, `crash-into-water` has `LIVES $4D15=$01` — but the two
-snapshots are **not a matched before/after pair**: `become-boat`'s score (13625) is higher than
-`crash-into-water`'s (9850), so they come from different attempts/points, not a single continuous
-sequence. Can't conclude a life was lost from these two alone. Needs a same-session snapshot pair
-(boat entry, then crash) to confirm.
+**Yes — confirmed directly in code**, not just from snapshots. `MOVE_BOAT_CRASH`
+(`claude/Collision_Detection_Notes.md`) does `dec LIVES` on a water-hazard crash, gated only on
+whether `EXTRA_LIFE_AVAIL` (the game-timer-expired flag) is set — i.e. a crash always costs a life
+unless the timer has already run out. This settles the inconclusive snapshot comparison originally
+noted here (`become-boat` vs. `crash-into-water` weren't a matched before/after pair, so no
+snapshot-only conclusion was possible) — no further snapshot capture is needed for this question.
 
 ## New information (list)
 
@@ -165,8 +166,7 @@ sequence. Can't conclude a life was lost from these two alone. Needs a same-sess
    confirms the scripted sequence river-entrance -> boat documented piecemeal across snapshots.
 4. Row feature `$03` (between the two boat rows in segment `$11`) is not yet identified —
    candidate: a water-current/wake variant.
-5. Whether crashing into the water costs a life is unconfirmed (see above) — needs a paired
-   snapshot capture in one continuous session.
+5. Crashing into the water costs a life — confirmed in code (see above).
 6. `OBJ_TBL63/6B/73` (all three set to `$02` together) is a shared boat/terrain-mode flag for NPC
    object slots, confirmed across all three water snapshots.
 7. `ROAD_FEATURE $14` (in the repeating `$12`/`$13` water loop) is a ~2.3%-per-pass random spawn

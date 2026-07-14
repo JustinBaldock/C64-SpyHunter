@@ -36,20 +36,170 @@ transitions, but not confirmed which. All four target types have their own
 `draw` vectors in `OBJINIT_PARAM_TBL` (`$9448`/`$9478`/`$971E`/`$97A8`),
 none decoded yet.
 
-## Slot 1 - `MOVE_HERO` ($8BD4)
+## Slot 1 - `MOVE_HERO` ($8BD4) - full state-machine now interpreted (task #37)
 
 The hero/player car's own movement/state-machine logic - the most complex
-routine in the block. Broad shape: saves and clears the current `OBJ_TYPE`,
-then branches on `SEQ_STATE` (0-6) into several sub-checks involving
-`ROAD_FEATURE` (`$0F`/`$13`/`$14`), `ROAD_SEG_IDX`, a countdown
-(`STATE_4D10`, armed to `$64`=100), `FLAG_FC`, `FLAG_DD`, and `STATE_4D17`.
-Most paths either restore the saved `OBJ_TYPE` unchanged (`HERO_RESTORE_TYPE`)
-or commit one of several sub-state values (`$00`/`$07`/`$09`/`$11`/`$18`) via
-the shared `COMMIT_TYPE` tail. Not fully interpreted - candidate territory
-for boathouse/bridge/scripted-sequence transitions, given the `ROAD_FEATURE`
-values checked line up with features already documented elsewhere
-(`$13`=river-entrance, `$0F`=broken-bridge/return - see
-`claude/Boat_River_Notes.md`/`claude/Broken_Bridge_Notes.md`).
+routine in the block. It saves and clears the current `OBJ_TYPE`, branches
+on `SEQ_STATE` (0-6), and - depending on which branch and a handful of
+other flags - either restores the saved `OBJ_TYPE` unchanged
+(`HERO_RESTORE_TYPE`, i.e. no state change this frame) or commits a new
+`HERO_STATE` value via the shared `COMMIT_TYPE` tail. Cross-referencing
+every value against `claude/Road_Map_Decode.md`'s already-decoded
+`ROAD_FEATURE` codes and the collision/scoring findings in
+`claude/Enemy_Scoring_Notes.md` resolves what each branch represents:
+
+### `SEQ_STATE` dispatch
+
+| `SEQ_STATE` | Path | What it does |
+|---|---|---|
+| 0, 3, 6+ | `HERO_RESTORE_TYPE` | No-op - `MOVE_HERO` does nothing these frames |
+| **1** | `HERO_CHECK_ROAD_13` | **Boathouse-entry slowdown** (see below) |
+| **2 or 4** | `HERO_CHECK_4D17` | Road-sign-cycle passthrough, or ordinary driving sub-state (see below) |
+| **5** | inline check | `ROAD_FEATURE==$14` -> commit `$18`; otherwise no-op |
+
+### `SEQ_STATE==1`: the boathouse-entry slowdown
+
+```
+HERO_CHECK_ROAD_13:
+    lda ROAD_FEATURE
+    cmp #$13
+    beq HERO_ARM_TIMER
+    lda ROAD_SEG_IDX
+    cmp #$11
+    bne HERO_COUNTDOWN
+HERO_ARM_TIMER:
+    lda #$02
+    jsr SPEED_SET          ; force SCROLL_SPEED = SPEEDCODE_TBL[2] = 2 (slow)
+    lda #$64
+    sta STATE_4D10          ; arm a 100-frame countdown
+HERO_COUNTDOWN:
+    dec STATE_4D10
+    bne HERO_RESTORE_TYPE    ; still counting down -> no state change
+    inc STATE_4D10
+    bne SLOT1_SET_00          ; countdown just hit 0 -> commit HERO_STATE=$00
+```
+
+Triggered by `ROAD_FEATURE==$13` (already confirmed the river-entrance
+transition feature, `claude/Boat_River_Notes.md`) or `ROAD_SEG_IDX==$11`
+(the boat segment itself, reached from segment `$0F`/feature `$13` per the
+same doc). While active, it **forcibly holds `SCROLL_SPEED` at a fixed slow
+value for ~100 frames**, then releases the hero back to `HERO_STATE=$00`
+(ordinary driving). This is almost certainly the scripted "car slows down
+as it transitions into/through the boathouse" sequence - matches the
+manual's "road -> boathouse (car becomes amphibious) -> water" terrain
+description (`claude/Enemy_Agents_Manual_Reference.md`) about as directly
+as static reading can confirm without a live capture.
+
+### `SEQ_STATE` 2 or 4: sign-cycle passthrough vs. ordinary sub-states
+
+```
+HERO_CHECK_4D17:
+    lda STATE_4D17
+    beq HERO_CHECK_ROAD_0F
+    bmi HERO_CHECK_ROAD_0F
+    sec
+    ror STATE_4D17          ; STATE_4D17 positive & nonzero: halve it (mark
+    ...                     ;   consumed) but leave A - and hence the
+                             ;   *original* STATE_4D17 value - untouched;
+                             ;   a chain of BIT-skip no-ops then commits
+                             ;   THAT value as the new HERO_STATE
+```
+
+`STATE_4D17` is the "sign-cycle armed" flag from `UPDATE_SCENE_SELECT`
+(already documented there): it gets armed to a 3/2/1 round-robin value
+(`STATE_4D16`) specifically when `ROAD_FEATURE==$11` or
+`PREV_FEATURE==$15` - i.e. right at a river-entrance or just after leaving
+the water, timed to cycle which road-sign message
+(`ONROAD_MSG_TBL`/DETOUR/BRIDGE OUT/ICY ROADS) shows next. When this fires,
+`MOVE_HERO` copies that same 1/2/3 value straight into `HERO_STATE` via an
+elaborate chained BIT-skip (five consecutive 3-byte no-ops overlapping
+`SLOT1_SET_18`/`_00`/`_07`/`_11`/`_09`'s own bytes) rather than loading a
+fresh constant - `HERO_STATE` briefly becomes the sign-cycle counter's raw
+value. Since `HERO_STATE` `$00`-`$03` all share one `OBJINIT_PARAM_TBL`
+entry (identical move/draw vectors), this has no visible effect on the
+hero's own appearance - it reads as reusing the hero's own type field as
+convenient scratch storage for the sign-cycle counter, not a real hero
+state.
+
+When `STATE_4D17` is zero/negative (the normal case, away from a sign-cycle
+moment), falls to `HERO_CHECK_ROAD_0F`:
+
+```
+HERO_CHECK_ROAD_0F:
+    lda ROAD_FEATURE
+    cmp #$0F : beq HERO_CHECK_RANGE      ; back on solid road -> check range
+    cmp #$13 : bcs HERO_RESTORE_TYPE     ; >= water-crossing features -> no-op
+    ldy FLAG_FC
+    beq HERO_CHECK_RANGE
+    dec FLAG_FC
+    beq SLOT1_SET_09                      ; FLAG_FC just reached 0 -> HERO_STATE=$09
+HERO_CHECK_RANGE:
+    cmp #$02 : bcc SLOT1_SET_11            ; ROAD_FEATURE < 2 -> HERO_STATE=$11
+    cmp #$0E : bcs HERO_RESTORE_TYPE       ; ROAD_FEATURE >= $0E -> no-op
+    lda FLAG_DD
+    bne SLOT1_SET_07                        ; FLAG_DD nonzero -> HERO_STATE=$07
+    beq HERO_RESTORE_TYPE                    ; FLAG_DD zero -> no-op
+```
+
+Three more `HERO_STATE` values fall out of this:
+
+* **`HERO_STATE=$11` when `ROAD_FEATURE < 2`** (i.e. `$00` or `$01`).
+  `$01` is the already-confirmed **bridge** feature code
+  (`claude/Road_Map_Decode.md`). This directly confirms the file header's
+  existing speculation: the `enemy-unshootable.vsf`/bridge snapshot's
+  `HERO_STATE=$11` is exactly this - a normal "on the bridge/narrow
+  section" substate, not anything shooting-related, and (independently,
+  `claude/Enemy_Scoring_Notes.md`) also explains why `$11` is excluded from
+  the bullet's own hit-resolution: it's a hero state, not an enemy type.
+* **`HERO_STATE=$07` when `ROAD_FEATURE` is in `[2,$0E)` and `FLAG_DD` is
+  nonzero.** `FLAG_DD` is set exactly once, in `LOAD_NEXT_SEGMENT`, when
+  the road graph loops back to segment `$1C` ("where the main path loops
+  back to the start...treat reaching it as 'completed a lap'" - existing
+  comment in `spyhunter.asm`) - and nothing resets it afterward. So this is
+  a **one-time, permanent latch**: the machine gun (which requires exactly
+  `HERO_STATE=$07`, `claude/Enemy_Scoring_Notes.md`) only becomes usable
+  after the road graph has cycled back to segment `$1C` once. Whether that
+  happens seconds into a run or after a full lap depends on the segment
+  graph's actual layout/timing (`claude/Road_Map_Decode.md`) - not itself
+  re-confirmed here, but the gating mechanism is exact and unambiguous.
+* **`HERO_STATE=$09` when `ROAD_FEATURE==$0F` (or `<$13`) and a `FLAG_FC`
+  countdown reaches exactly 0.** `FLAG_FC` is the same flag
+  `WAIT_FRAME_TIMER` increments when the game timer expires
+  (`EXTRA_LIFE_AVAIL` becomes `$FF`) on the car scene - so this specific
+  branch only fires as part of that sequence, decrementing back to 0
+  exactly as the hero returns to solid road (`$0F`, the confirmed general
+  "back on solid road" marker reused at water-exit points,
+  `claude/Dock_Exit_Notes.md`). Reads as a brief, one-shot post-timer-expiry
+  transition state, not a repeating gameplay state.
+
+### `SEQ_STATE==5`: `HERO_STATE=$18`
+
+```
+    lda ROAD_FEATURE
+    cmp #$14
+    beq SLOT1_SET_18
+```
+
+`ROAD_FEATURE==$14` is the confirmed random enemy-boat spawn trigger inside
+the repeating water loop (`claude/Boat_River_Notes.md`). `HERO_STATE=$18`
+being tied to this exact feature, during a specific `SEQ_STATE`, is
+consistent with `SLOT0_HERO_WATCH`'s already-documented reaction to
+`HERO_STATE=$18` (transitions its own type to `$1A`) and with the earlier
+"two-part hero-boat respawn animation" candidate in
+`claude/Enemy_Agents_Manual_Reference.md` for `$18`/`$19` - likely the
+splash/respawn visual cue tied to the water-loop's spawn cadence, though
+the exact visual isn't confirmed from static reading alone.
+
+### Cross-check: `SLOT0_HERO_WATCH`
+
+Slot 0's own handler (above) reacts to `HERO_STATE` `$07`/`$09`/`$18`
+(exactly three of the five values `MOVE_HERO` can commit to) by changing
+**its own** type - i.e. slot 0 is a dedicated "reacts to the hero's state"
+companion object, and now that all three trigger values are pinned to
+specific `SEQ_STATE`/`ROAD_FEATURE` contexts above, slot 0's own
+transitions (to `$08`/`$0A`/`$1A`) inherit the same context: `$08` fires
+alongside the lap-completion gun-ready state, `$0A` alongside the
+post-timer-expiry blip, `$1A` alongside the water-loop spawn cue.
 
 ## Slots 2 & 4 - `SLOT_2_4_ENTRY` ($8C5B) / slot 3&5 overlap (`$8C5E`)
 
@@ -129,9 +279,13 @@ registers $D017/$D01C/$D01D/$D027).
   `claude/Enemy_Scoring_Notes.md`.
 * The six data tables and two subroutines the `COMMIT_TYPE` tail reads/calls
   are now converted - see `claude/Draw_Handler_Notes.md`.
-* Slot 1's (`MOVE_HERO`'s) full semantics - only the control-flow shape is
-  traced, not what each `SEQ_STATE`/sub-state transition represents in
-  gameplay terms.
+* Slot 1's (`MOVE_HERO`'s) full semantics are now interpreted - see the
+  "full state-machine now interpreted" section above (task #37). What's
+  left is confirming the exact visual/gameplay feel of each transition
+  against live play (e.g. does the boathouse-entry slowdown visibly feel
+  like "becoming amphibious"; what `HERO_STATE=$18`/slot 0's `$1A` reaction
+  actually looks like on screen) - static reading has gone as far as it can
+  without a live capture.
 
 Rebuilt and verified: `spyhunter.bin` MD5 unchanged at
 `5af76758a98f7fc30dda87e48f94f5db` - the entire conversion is

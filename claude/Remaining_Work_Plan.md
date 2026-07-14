@@ -49,10 +49,16 @@ identification questions rather than "find the code" questions:
   `OBJ_TYPE`, harmlessly). `$C6`/`$C7` identified as `SPR_STAGE` entry 6
   (hardware sprite 6's clamped delta) - the exact runtime semantics of
   *which* object's delta it holds at fire time is still open.
-- **#37** - `MOVE_HERO`'s full `SEQ_STATE`/`ROAD_FEATURE` state-machine -
-  structurally traced and converted to real instructions already, but not
-  yet mapped to specific gameplay moments (candidate: boathouse/bridge
-  scripted sequences).
+- ~~**#37**~~ - **Done**, see `claude/Hero_Object_Move_Handler_Notes.md`.
+  Every `SEQ_STATE`/`ROAD_FEATURE` branch in `MOVE_HERO` is now mapped to a
+  specific transition: `SEQ_STATE=1` is the boathouse-entry forced-slowdown
+  (100-frame `SCROLL_SPEED` hold triggered by `ROAD_FEATURE=$13`/segment
+  `$11`); `SEQ_STATE` 2/4 either passes a road-sign-cycle counter through
+  the hero's own type field (harmlessly) or commits `HERO_STATE=$11`
+  (bridge, `ROAD_FEATURE<2`), `$07` (machine-gun-ready, gated by a
+  one-time "completed a lap" latch), or `$09` (a post-timer-expiry blip);
+  `SEQ_STATE=5` commits `$18` at the water-loop's random-spawn feature.
+  Cross-confirms `$11`'s "hero state, not an enemy" finding from #33.
 
 These genuinely need **live gameplay evidence** (a VICE snapshot pair, not
 just static reading), separate from Phase 1's code conversion:
@@ -63,12 +69,11 @@ just static reading), separate from Phase 1's code conversion:
   analysis alone.) Also: what does the steering half's `SPR_XMSB` bit-6
   toggle actually do on screen?
 
-## Phase 3 - Documentation housekeeping
+## Phase 3 - Documentation housekeeping (COMPLETE)
 
-- **#35** - `Boat_River_Notes.md` still has an "open item: does crashing
-  cost a life?" section marked unconfirmed, even though this was directly
-  settled by code-reading in `Collision_Detection_Notes.md`. Just needs the
-  cross-reference added.
+- ~~**#35**~~ - **Done.** `Boat_River_Notes.md`'s stale "open item: does
+  crashing cost a life?" section now points to the code-level confirmation
+  in `Collision_Detection_Notes.md`.
 
 ## How this list was verified
 

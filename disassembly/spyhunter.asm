@@ -454,9 +454,16 @@ FRAME_FLAG = $4D00    ; IRQ frame counter (waited on)
 GAME_TIME_LO = $4D01    ; game timer BCD lo (on-screen timer)
 GAME_TIME_HI = $4D02    ; game timer BCD hi
 IRQ_TOGGLE = $4D03    ; IRQ scroll toggle
-STATE_4D04 = $4D04    ; per-slot "pending/last type change" value (???), set
-                      ;   alongside a committed OBJ_TYPE change - see the
-                      ;   hero/object move-handler block, Stage 5
+STATE_4D04 = $4D04    ; per-slot value set alongside a committed OBJ_TYPE
+                      ;   change (hero/object move-handler block, Stage 5) -
+                      ;   COMMIT_DIR_LEFT_PTR/RIGHT_PTR (the edge-spawn tail)
+                      ;   both read it, add 3, and compare against $1E (30)
+                      ;   to help decide the new spawn's type/column, and
+                      ;   MOVE_HERO's SLOT1_SET_09 path sets it to $09
+                      ;   directly - consistent with a "recent spawn/type-
+                      ;   change activity" counter used to pace how often a
+                      ;   slot can respawn, but the exact scale (frames?
+                      ;   spawn attempts?) isn't confirmed (???)
 STATE_4D05 = $4D05
 NEXT_LIFE_SCORE = $4D06    ; next extra-life threshold
 STATE_4D07 = $4D07
@@ -527,40 +534,99 @@ HIT_GROUP0 = $4D1F    ; collision group mask 0
 HIT_GROUP1 = $4D20    ; collision group mask 1
 HIT_GROUP2 = $4D21    ; collision group mask 2
 HIT_ACCUM = $4D22    ; collision accumulator
-OBJ_TBL23 = $4D23    ; per-slot value, written alongside OBJ_TBL2B/SPRITE_PTRS (???)
+OBJ_TBL23 = $4D23    ; per-slot BASE sprite pointer - COMMIT_TYPE copies
+                      ;   TYPE_TBL_SPRPTR's value here AND into SPRITE_PTRS at
+                      ;   spawn; every frame after, COMMIT_SPRITE_OFS recomputes
+                      ;   SPRITE_PTRS = OBJ_TBL33 (anim-frame offset) + this
+                      ;   base - confirmed by direct reading, not a guess
 SPRITE_PTRS = $4D2B    ; sprite pointer shadow (copied to $7BF8 each frame)
-OBJ_TBL33 = $4D33    ; per-slot value (???)
+OBJ_TBL33 = $4D33    ; per-slot animation-frame sprite-pointer OFFSET - added
+                      ;   to OBJ_TBL23 (the base pointer) by COMMIT_SPRITE_OFS
+                      ;   every frame to get the current SPRITE_PTRS value;
+                      ;   the DRAW_DISPATCH_99CB/99D8 tail (per-type draw code)
+                      ;   is what advances it frame to frame
 STATE_4D34 = $4D34    ; per-slot draw-timer value, used by the shared
                        ;   "decrement/loop" draw-routine tail (???)
 STATE_4D39 = $4D39    ; state byte (???)
-OBJ_TBL3B = $4D3B    ; per-slot value, low nibble of a signed offset (???)
-OBJ_TBL43 = $4D43    ; per-slot value, low nibble of a signed offset (???)
-STATE_4D44 = $4D44    ; state byte, indexes DRAW_T07_TAIL_TBL (???)
-OBJ_TBL4B = $4D4B    ; per-slot value, low nibble of a signed offset (???)
-OBJ_TBL53 = $4D53    ; per-slot value, combines OBJ_TBL3B/4B/43 nibbles (???)
+OBJ_TBL3B = $4D3B    ; per-slot X target threshold (negative/left direction)
+                      ;   - confirmed this session: DRAW_MOVE_X_NEG/CHECK
+                      ;   compare OBJ_POS_X against it to decide whether to
+                      ;   nudge the slot's position one step closer per frame
+OBJ_TBL43 = $4D43    ; per-slot X target threshold (positive/right
+                      ;   direction) - same DRAW_MOVE_X_POS mechanism as
+                      ;   OBJ_TBL3B above, mirrored
+STATE_4D44 = $4D44    ; TYPE $07 (the Copter)'s own approach-phase index:
+                      ;   DRAW_T07_PROX_CHECK adjusts it up/down (clamped
+                      ;   0-2) based on the $C6 proximity value each frame,
+                      ;   and it indexes DRAW_T07_TAIL_TBL to pick a per-
+                      ;   phase timer/VIC_SPR_YEXP value - reads as a
+                      ;   near/mid/far bombing-run stage, not confirmed
+                      ;   against the visual (???)
+OBJ_TBL4B = $4D4B    ; per-slot Y target threshold - same DRAW_MOVE_Y_CHECK
+                      ;   step-toward-target mechanism as OBJ_TBL3B/43,
+                      ;   confirmed this session (see those comments)
+OBJ_TBL53 = $4D53    ; per-slot Y target threshold, combines OBJ_TBL3B/4B/43
+                      ;   nibbles (COMMIT_TYPE) - the DRAW_MOVE_DISPATCH
+                      ;   frame-parity path compares OBJ_POS_Y against it
 STATE_4D54 = $4D54    ; state byte (???)
 OBJ_TBL5B = $4D5B    ; per-slot value (???)
 STATE_4D5C = $4D5C    ; state byte (???)
 STATE_4D61 = $4D61    ; state byte (???)
 OBJ_TBL63 = $4D63
-STATE_4D64 = $4D64    ; state byte (???)
+STATE_4D64 = $4D64    ; hero-draw state, checked together with STATE_4D6C/
+                      ;   STATE_4D74 (all-zero -> DRAW_T00_F3 moves on to F4).
+                      ;   Its own value (0/{3,4,5}/other) selects a -1/0/+1
+                      ;   sprite X-nudge in DRAW_T00_F3 - candidate: current
+                      ;   steering/lane direction, not confirmed (???)
 OBJ_TBL69 = $4D69
 OBJ_TBL6B = $4D6B
-STATE_4D6C = $4D6C    ; state byte (???)
+STATE_4D6C = $4D6C    ; hero-draw state, checked alongside STATE_4D64 (see
+                      ;   its comment) - part of the same all-zero gate (???)
 OBJ_TBL71 = $4D71
 OBJ_TBL73 = $4D73
-STATE_4D74 = $4D74    ; state byte (???)
+STATE_4D74 = $4D74    ; hero-draw state, checked alongside STATE_4D64 (see
+                      ;   its comment); DRAW_T00_F1 also checks it alone to
+                      ;   decide whether to tick STATE_9B/STATE_4D54 (???)
 OBJ_TBL79 = $4D79
 OBJ_TBL7B = $4D7B    ; per-slot hazard-check value (HAZARD_CHECK_CHAIN)
 STATE_4D7C = $4D7C    ; state byte (???)
 STATE_4D81 = $4D81    ; state byte (???)
-STATE_4D83 = $4D83    ; per-slot: swap-target slot index / "paired with" (???)
-STATE_4D84 = $4D84    ; single flag/counter, not per-slot (???)
-STATE_4D89 = $4D89    ; boat: "already crashed/handled this frame" flag (???)
-OBJ_TBL8B = $4D8B    ; per-slot counter, related to STATE_4D83 pairing (???)
-OBJ_TBL93 = $4D93    ; per-slot value read into CONSUME_HIT_MASK_BIT (???)
-OBJ_TBL9B = $4D9B    ; per-slot value, combined with OBJ_TBLA3 (???)
-OBJ_TBLA3 = $4DA3    ; per-slot value, combined with OBJ_TBL9B (???)
+STATE_4D83 = $4D83    ; per-slot "hit pending" flag - confirmed the shared
+                      ;   signal between the bullet's hit-resolution
+                      ;   (MOVE_TYPE_1B_B sets it on a proximity match) and
+                      ;   each TYPE's own MOVE_TYPE_* handler (checks it
+                      ;   nonzero next frame to award its hardcoded
+                      ;   POINTS_TBL kill tier via ARM_SCORE_EVENT_X8 - see
+                      ;   claude/Enemy_Scoring_Notes.md). MOVE_TYPE_0C
+                      ;   uniquely decrements it as a multi-frame counter
+                      ;   instead of a single flag (candidate: the Road
+                      ;   Lord's "must be rammed repeatedly" mechanic)
+STATE_4D84 = $4D84    ; single flag/counter, not per-slot - incremented by
+                      ;   MOVE_TYPE_1B_HIT (the bullet's direct hit on TYPE
+                      ;   $07/$08) and reset by MOVE_TYPE_18 - candidate: a
+                      ;   global "just scored an aerial hit" flag, not
+                      ;   confirmed (???)
+STATE_4D89 = $4D89    ; boat: "already crashed/handled this frame" flag -
+                      ;   confirmed by MOVE_BOAT_MAIN/MOVE_BOAT_CRASH
+                      ;   (claude/Collision_Detection_Notes.md); also armed
+                      ;   by DRAW_STATE_4D89_PREP when SPEED_SUM falls in
+                      ;   [$23,$DC) - candidate: re-arms once the car/boat
+                      ;   has settled into a mid-range speed after a crash
+OBJ_TBL8B = $4D8B    ; per-slot hazard-check match counter: MOVE_HAZARD_TAIL
+                      ;   increments it when HAZARD_CHECK_07 matches, and
+                      ;   again for HAZARD_CHECK_0B (only attempted if still
+                      ;   zero) - gates which hazard checks still run this
+                      ;   pass once one has already matched
+OBJ_TBL93 = $4D93    ; per-slot proximity/hitbox threshold, compared against
+                      ;   the clamped SPR_STAGE sprite-distance in
+                      ;   CONSUME_HIT_MASK_BIT - the sprite-to-sprite
+                      ;   collision check (see that routine's own comment).
+                      ;   Exact units (pixels? clamped delta steps?) (???)
+OBJ_TBL9B = $4D9B    ; per-slot value, added to/subtracted from OBJ_TBLA3 in
+                      ;   CONSUME_HIT_MASK_BIT's threshold comparison -
+                      ;   candidate: hitbox half-width paired with OBJ_TBLA3's
+                      ;   centre offset (???)
+OBJ_TBLA3 = $4DA3    ; per-slot value, combined with OBJ_TBL9B (see above) (???)
 OBJ_TBLAB = $4DAB
 STATE_4DAC = $4DAC
 STATE_4DAE = $4DAE    ; state byte (???)
@@ -2392,8 +2458,13 @@ ROTATE_NIBBLE_B:
 ; and classifies the road tile(s) under the object into a "distance" bucket
 ; via OBJ_DIST_TBL - almost certainly driving Spy Hunter's pseudo-3D
 ; perspective effect (things further up the screen = further away = drawn
-; smaller/differently), though the exact use of the resulting bucket value
-; isn't traced past where it's stored. (???)
+; smaller/differently). The resulting bucket values (OBJ_TBL63/6B/73) ARE
+; consumed further downstream, confirmed this session: the HAZARD_CHECK_*
+; chain (claude/Collision_Detection_Notes.md) compares them against specific
+; hazard tile codes, and ATTRACT_HELPER/COMMIT_DIR_LEFT_PTR read OBJ_TBL73
+; directly as the confirmed boat-mode flag ($02) - so "distance bucket" also
+; doubles as this game's tile/terrain classification used for hazard and
+; boat-mode detection, not purely a perspective effect.
 OBJ_CALC_SCREEN_POS:
     ldx OBJ_IDX
     clc
@@ -2516,16 +2587,103 @@ OBJ_TILE_CLASSIFY_DONE:
     sta OBJ_TBL63,x
     rts
 ; -----------------------------------------------------------------------
-; OBJ_DIST_TBL: object distance thresholds, followed by aux data (computed jumps).
-    .byte $04,$08,$14,$1C,$24,$30,$38,$40,$72,$7A,$A7,$AD,$B7,$A9,$00,$85
-    .byte $12,$A9,$78,$85,$13,$A9,$0F,$D0,$0A,$A9,$C0,$85,$12,$A9,$7B,$85
-    .byte $13,$A9,$F3,$99,$CB,$00,$A9,$00,$A0,$04,$06,$08,$90,$04,$A9,$08
-    .byte $A0,$14,$85,$08,$84,$09,$4A,$4A,$9D,$7B,$4D,$E0,$06,$F0,$1D,$B5
-    .byte $A2,$F0,$10,$C9,$18,$F0,$17,$18,$AD,$04,$4D,$69,$03,$C9,$1E,$90
-    .byte $0D,$B0,$09,$A5,$4A,$C9,$13,$90,$03,$A9,$12,$2C,$A9,$03,$8D,$04
-    .byte $4D,$A8,$C8,$C0,$23,$B0,$28,$B1,$12,$C5,$08,$90,$F5,$C5,$09,$B0
-    .byte $F1,$8C,$04,$4D,$98,$A4,$07,$0A,$18,$69,$06,$0A,$0A,$99,$CA,$00
-    .byte $A5,$05,$90,$04,$05,$DA,$D0,$04,$49,$FF,$25,$DA,$85,$DA,$18,$60
+; OBJ_DIST_TBL: object distance thresholds (13 bytes) - the rest of this
+; block, previously mislabelled "aux data (computed jumps)" and left as raw
+; bytes, is genuine code: COMMIT_DIR_RIGHT_PTR/RIGHT_PTR, already called via
+; JSR from COMMIT_TYPE's COMMIT_DIR_LEFT/COMMIT_DIR_RIGHT (Hero_Object_Move_
+; Handler_Notes.md) to finish spawning a newly-committed object entering
+; from the left/right screen edge: stages its initial Y position, derives a
+; hazard threshold (OBJ_TBL7B) and a matching screen-tile scan range
+; (ZTMP_08/09), possibly reclassifies STATE_4D04 based on this slot's
+; current OBJ_TYPE/SCENE_IDX (special-cased for slot 6, the boat), scans up
+; to 35 columns of the road-template screen for the first tile in that
+; range, and finally derives an initial staged X position/SPR_XMSB bit from
+; where (if anywhere) it found one (carry clear = found, set = not found -
+; matching the "bcs MOVE_BAIL"-style convention callers elsewhere use). One
+; more "BIT-absolute as a 2-byte skip" overlap trick, same idiom as
+; elsewhere in this file.
+    .byte $04,$08,$14,$1C,$24,$30,$38,$40,$72,$7A,$A7,$AD,$B7
+COMMIT_DIR_RIGHT_PTR:
+    lda #$00
+    sta SRC_PTR
+    lda #$78
+    sta SRC_PTR_HI
+    lda #$0F
+    bne COMMIT_DIR_SPAWN_Y   ; (unconditional - A is always $0F, nonzero)
+COMMIT_DIR_LEFT_PTR:
+    lda #$C0
+    sta SRC_PTR
+    lda #$7B
+    sta SRC_PTR_HI
+    lda #$F3
+COMMIT_DIR_SPAWN_Y:
+    sta a:SPR_Y_SHADOW,y
+    lda #$00
+    ldy #$04
+    asl ZTMP_08
+    bcc COMMIT_DIR_HAZARD_STORE
+    lda #$08
+    ldy #$14
+COMMIT_DIR_HAZARD_STORE:
+    sta ZTMP_08
+    sty ZTMP_09
+    lsr a
+    lsr a
+    sta OBJ_TBL7B,x
+    cpx #$06
+    beq COMMIT_DIR_TYPE_ALT
+    lda OBJ_TYPE,x
+    beq COMMIT_DIR_CHECK_SCENE
+    cmp #$18
+    beq COMMIT_DIR_SET_TYPE
+    clc
+    lda STATE_4D04
+    adc #$03
+    cmp #$1E
+    bcc COMMIT_DIR_SET_TYPE
+    bcs COMMIT_DIR_TYPE_ALT
+COMMIT_DIR_CHECK_SCENE:
+    lda SCENE_IDX
+    cmp #$13
+    bcc COMMIT_DIR_TYPE_ALT
+    lda #$12
+    .byte $2C
+COMMIT_DIR_TYPE_ALT:
+    .byte $A9,$03
+COMMIT_DIR_SET_TYPE:
+    sta STATE_4D04
+    tay
+COMMIT_DIR_SCAN_LOOP:
+    iny
+    cpy #$23
+    bcs COMMIT_DIR_DONE
+    lda (SRC_PTR),y
+    cmp ZTMP_08
+    bcc COMMIT_DIR_SCAN_LOOP
+    cmp ZTMP_09
+    bcs COMMIT_DIR_SCAN_LOOP
+    sty STATE_4D04
+    tya
+    ldy OBJ_IDX2
+    asl a
+    clc
+    adc #$06
+    asl a
+    asl a
+    sta a:SPR_X_SHADOW,y
+    lda BIT_MASK
+    bcc COMMIT_DIR_XMSB_CLR
+    ora SPR_XMSB
+    bne COMMIT_DIR_XMSB_STORE
+COMMIT_DIR_XMSB_CLR:
+    eor #$FF
+    and SPR_XMSB
+COMMIT_DIR_XMSB_STORE:
+    sta SPR_XMSB
+    clc
+COMMIT_DIR_DONE:
+    rts
+
 
 ; -----------------------------------------------------------------------
 ; For the CURRENT object (OBJ_IDX2), compute its X/Y DELTA to each of the 8
@@ -2533,8 +2691,13 @@ OBJ_TILE_CLASSIFY_DONE:
 ; pack it (sign bit + magnitude) into SPR_STAGE. This looks like prep work
 ; for the sprite-multiplexing system (SPR_STAGE is consumed elsewhere as
 ; "staged hardware sprite coords") - likely used to decide proximity/
-; ordering when deciding which hardware sprite to reassign to which object,
-; though the exact downstream use isn't traced from here. (???)
+; ordering when deciding which hardware sprite to reassign to which object.
+; Confirmed one concrete consumer this session: GUN_CHECK_FIRE (the machine-
+; gun fire gate, claude/Enemy_Scoring_Notes.md) reads SPR_STAGE entry 6
+; (`$C6`/`$C7`) as a proximity/clearance check before allowing a shot - so
+; at least one use is "is hardware sprite 6 too close" gating player fire,
+; though whether that's the primary purpose or a side-effect reuse of this
+; general-purpose array is still open. (???)
 ;
 ; The outer/inner-loop split (ZTMP_0A starting at 1, doubled via ASL each
 ; pass, looping while carry stays clear) is the same "repeat exactly 8
@@ -2897,7 +3060,7 @@ HERO_CHECK_ROAD_13:
     bne HERO_COUNTDOWN
 HERO_ARM_TIMER:
     lda #$02
-    jsr $A106
+    jsr SPEED_SET
     lda #$64
     sta STATE_4D10
 HERO_COUNTDOWN:
@@ -2956,7 +3119,7 @@ SLOT_3_5_ENTRY:
     beq SLOT24_APPLY
     cmp #$14
     beq SLOT24_APPLY
-    jsr $A10E
+    jsr RNG_NEXT
     and #$03
     clc
     adc ZTMP_08
@@ -3063,6 +3226,11 @@ TYPE_GUN_NOFIRE:
     .byte $A9,$0B,$2C
 TYPE_ANIM_BUSY:
     .byte $A9,$04,$2C
+; Reached via direct JSR from TRIGGER_SWAP_FX (the tail of ARM_SCORE_EVENT,
+; below) - i.e. this commits OBJ_TYPE=$14 specifically right after an enemy
+; kill has just been queued for scoring. Strong candidate: the
+; explosion/destroyed-enemy effect type.
+TYPE_KILL_FX:
     .byte $A9,$14
 COMMIT_TYPE:
     sta OBJ_TYPE,x
@@ -3176,11 +3344,11 @@ COMMIT_DIR_CHECK2:
     asl ZTMP_08
     bcs COMMIT_DIR_RIGHT
 COMMIT_DIR_LEFT:
-    jsr $8994
+    jsr COMMIT_DIR_LEFT_PTR
     lda OBJ_TBL53,x
     jmp COMMIT_APPLY_XVEL
 COMMIT_DIR_RIGHT:
-    jsr $8988
+    jsr COMMIT_DIR_RIGHT_PTR
     lda OBJ_TBL4B,x
 COMMIT_APPLY_XVEL:
     bcs MOVE_BAIL
@@ -3192,8 +3360,8 @@ COMMIT_APPLY_XVEL:
     sta OBJ_TBL8B,x
     sta STATE_4D83,x
     sta OBJ_TBLAB,x
-    jsr $99DB
-    jsr $8E5E
+    jsr COMMIT_SPRITE_OFS
+    jsr CLEAR_HIT_STATE
     sec
     rts
 MOVE_BAIL:
@@ -3224,6 +3392,11 @@ INIT_OBJECT_SLOT:
     lda BIT_MASK_INV
     and HIT_GROUP2
     sta HIT_GROUP2
+; Secondary entry point: clear just this slot's HIT_MASK_A/HIT_MASK_B/
+; HIT_ACCUM bits (skipping the position/type/sprite-pointer/HIT_GROUP0/
+; HIT_GROUP2 reset above) - called directly via JSR from COMMIT_APPLY_XVEL's
+; tail once a new type/position has been committed.
+CLEAR_HIT_STATE:
     lda BIT_MASK_INV
     and HIT_MASK_A
     sta HIT_MASK_A
@@ -3285,13 +3458,13 @@ DRAW_TBL_T07:
     .word DRAW_T07_F3
 DRAW_T07_TAIL_TBL:
     .byte $00,$04,$01
-L8F43:
+DRAW_T07_NOT_READY:
     sec
     ror HERO_STATE
     lda #$00
     sta FLAG_FF
     rts
-L8F4B:
+DRAW_T07_ARM_TIMER:
     jsr RNG_NEXT
     and #$3F
     sta STATE_4D5C
@@ -3303,9 +3476,9 @@ DRAW_T07_F0:
     jsr SOUND_REQ_V0B
     lda SPAWN_Y
     cmp #$09
-    bcc L8F43
-    jmp L8FE9
-L8F66:
+    bcc DRAW_T07_NOT_READY
+    jmp DRAW_T07_DISPATCH
+DRAW_T07_RESET:
     dec STATE_9B
     lda #$00
     sta $AB
@@ -3316,92 +3489,92 @@ L8F66:
     lda #$FF
     sta FLAG_FF
     pla
-    bpl L8F83
+    bpl DRAW_T07_RESET_DONE
     lda #$01
     sta STATE_4D5C
     jsr ATTRACT_HELPER
-L8F83:
+DRAW_T07_RESET_DONE:
     rts
 DRAW_T07_F1:
     lda STATE_4DAC
-    bne L8F66
+    bne DRAW_T07_RESET
     lda FLAG_FF
-    bpl L8F90
-    jmp L8FFD
-L8F90:
-    bne L8F95
-    jsr L8F4B
-L8F95:
+    bpl DRAW_T07_CHECK_TIMER
+    jmp DRAW_T07_CLEAR_AB
+DRAW_T07_CHECK_TIMER:
+    bne DRAW_T07_PROX_CHECK
+    jsr DRAW_T07_ARM_TIMER
+DRAW_T07_PROX_CHECK:
     lda $C6
     asl
     php
     cmp #$02
-    bcc L8FBA
+    bcc DRAW_T07_INDEX_MIN
     plp
-    bcc L8FAC
+    bcc DRAW_T07_INDEX_INC
     lda STATE_4D44
-    beq L8FA8
+    beq DRAW_T07_INDEX_MAX
     dec STATE_4D44
-L8FA8:
+DRAW_T07_INDEX_MAX:
     lda #$FF
-    bne L8FBD
-L8FAC:
+    bne DRAW_T07_INDEX_STORE
+DRAW_T07_INDEX_INC:
     lda STATE_4D44
     cmp #$02
-    bcs L8FB6
+    bcs DRAW_T07_INDEX_MID
     inc STATE_4D44
-L8FB6:
+DRAW_T07_INDEX_MID:
     lda #$01
-    bne L8FBD
-L8FBA:
+    bne DRAW_T07_INDEX_STORE
+DRAW_T07_INDEX_MIN:
     plp
     lda #$00
-L8FBD:
+DRAW_T07_INDEX_STORE:
     sta $AB
     lda SPEED_SUM
     sec
     sbc #$3C
     sbc SPAWN_Y
-    beq L8FF9
-    bcs L8FCD
+    beq DRAW_T07_DIR_ZERO
+    bcs DRAW_T07_DIR_POS
     lda #$FF
     .byte $2C
-L8FCD:
+DRAW_T07_DIR_POS:
     .byte $A9,$01
-L8FCF:
+DRAW_T07_SET_DIR:
     sta STATE_4D54
     ldy STATE_4D44
     lda DRAW_T07_TAIL_TBL,y
     sta STATE_4D34
     lda VIC_SPR_YEXP
     dey
-    bne L8FE4
+    bne DRAW_T07_YEXP_CLEAR
     ora BIT_MASK
     .byte $2C
-L8FE4:
+DRAW_T07_YEXP_CLEAR:
     .byte $25,$10
     sta VIC_SPR_YEXP
-L8FE9:
+DRAW_T07_DISPATCH:
     lda STATE_4D54
-L8FEC:
+DRAW_T07_COMMIT:
     pha
     jsr DRAW_DISPATCH_99D8
     pla
-    jsr L98FB
+    jsr DRAW_ADJUST_POS_Y
     ldx OBJ_IDX
     jmp ATTRACT_HELPER
-L8FF9:
+DRAW_T07_DIR_ZERO:
     lda #$00
-    beq L8FCF
-L8FFD:
+    beq DRAW_T07_SET_DIR
+DRAW_T07_CLEAR_AB:
     lda #$00
     sta $AB
-    jmp L8FEC
+    jmp DRAW_T07_COMMIT
 DRAW_T07_F2:
     lda $C7
-    bmi L8FE9
+    bmi DRAW_T07_DISPATCH
     dec STATE_9B
-    jmp L8F4B
+    jmp DRAW_T07_ARM_TIMER
 DRAW_T07_F3:
     dec STATE_9B
     dec $AB
@@ -3424,28 +3597,28 @@ DRAW_T08_F0:
     lda #$04
     sta OBJ_ANIM
     lda #$01
-    jsr L9076
+    jsr DRAW_T08_CALC_Y
     sbc #$0C
-    jsr L9096
-    jmp L9064
+    jsr DRAW_T08_CALC_X
+    jmp DRAW_T08_COMMIT
 DRAW_T08_F1:
     lda #$00
-    jsr L9076
-    jsr L9096
-    jmp L9064
+    jsr DRAW_T08_CALC_Y
+    jsr DRAW_T08_CALC_X
+    jmp DRAW_T08_COMMIT
 DRAW_T08_F2:
     lda #$02
-    jsr L9076
-    jsr L9096
+    jsr DRAW_T08_CALC_Y
+    jsr DRAW_T08_CALC_X
     sbc #$15
-    jmp L9064
+    jmp DRAW_T08_COMMIT
 DRAW_T08_F3:
     lda #$03
-    jsr L9076
+    jsr DRAW_T08_CALC_Y
     sbc #$0C
-    jsr L9096
+    jsr DRAW_T08_CALC_X
     sbc #$15
-L9064:
+DRAW_T08_COMMIT:
     sta SPR_Y_SHADOW
     ldx OBJ_IDX
     dec OBJ_ANIM
@@ -3454,7 +3627,7 @@ L9064:
     ora #$01
     sta VIC_SPR_ENA
     rts
-L9076:
+DRAW_T08_CALC_Y:
     sta OBJ_TBL33
     lda VIC_SPR_ENA
     and #$FE
@@ -3472,7 +3645,7 @@ L9076:
     rts
 DRAW_T00_F3_TBL:
     .byte $03,$05,$08
-L9096:
+DRAW_T08_CALC_X:
     ror ZTMP_08
     rol
     php
@@ -3500,65 +3673,65 @@ DRAW_TBL_T00:
     .word DRAW_T00_F9
 DRAW_T00_F0:
     stx STATE_4DAC
-    jmp L91DC
-L90C4:
+    jmp DRAW_T00_TAIL
+DRAW_T00_ANIM_TICK:
     dec STATE_9B
-L90C6:
+DRAW_T00_GATE:
     jmp DRAW_TIMER_GATE
 DRAW_T00_F1:
     ldx #$FF
     stx $B3
     lda STATE_4D74
-    bne L90D8
+    bne DRAW_T00_F1_STORE
     dec STATE_9B
     inc STATE_4D54
     inx
-L90D8:
+DRAW_T00_F1_STORE:
     stx $AB
-    jmp L9119
+    jmp DRAW_T00_TO_T0A
 DRAW_T00_F2:
     lda FLAG_A1
-    bne L90C6
-    beq L90C4
+    bne DRAW_T00_GATE
+    beq DRAW_T00_ANIM_TICK
 DRAW_T00_F3:
     lda #$00
     cmp STATE_4D64
-    bne L90F4
+    bne DRAW_T00_F3_ADJUST
     cmp STATE_4D74
-    bne L90F4
+    bne DRAW_T00_F3_ADJUST
     cmp STATE_4D6C
     beq DRAW_T00_F4
-L90F4:
+DRAW_T00_F3_ADJUST:
     jsr SPEED_SET
     lda #$01
     sta $B3
     lda SPAWN_Y
     cmp #$A0
-    beq L90C4
+    beq DRAW_T00_ANIM_TICK
     ldx #$00
     lda STATE_4D64
-    beq L9116
+    beq DRAW_T00_F3_INC
     cmp #$03
-    beq L9117
+    beq DRAW_T00_F3_STORE
     cmp #$04
-    beq L9117
+    beq DRAW_T00_F3_STORE
     cmp #$05
-    beq L9117
+    beq DRAW_T00_F3_STORE
     dex
     dex
-L9116:
+DRAW_T00_F3_INC:
     inx
-L9117:
+DRAW_T00_F3_STORE:
     stx $AB
-L9119:
+DRAW_T00_TO_T0A:
     ldx OBJ_IDX
     jsr DRAW_TIMER_GATE
     jmp DRAW_T0A_F0
 DRAW_T00_F4:
     lda SCROLL_SPEED
-    beq L913D
+    beq DRAW_T00_F4_STOPPED
     cmp #$01
-    beq L9142
+    beq DRAW_T00_F4_CONT
     dec STATE_4D08
     ldy #$0F
     jsr SPEED_STEP_DOWN
@@ -3567,96 +3740,96 @@ DRAW_T00_F4:
     sbc ROAD_X_REF
     sta $B3
     dec $B3
-    jmp L91DC
-L913D:
+    jmp DRAW_T00_TAIL
+DRAW_T00_F4_STOPPED:
     lda #$01
     jsr SPEED_SET
-L9142:
+DRAW_T00_F4_CONT:
     lda #$FD
     sta $B3
     lda #$01
     sta $AB
     ldx STATE_4D64
-    beq L9119
+    beq DRAW_T00_TO_T0A
     ldx STATE_4D74
-    beq L9119
+    beq DRAW_T00_TO_T0A
     lda #$00
     sta $AB
     ldx SPAWN_Y
     cpx #$90
-    bcs L9119
+    bcs DRAW_T00_TO_T0A
     sta $B3
     dec STATE_9B
-    bpl L9119
+    bpl DRAW_T00_TO_T0A
 DRAW_T00_F5:
     lda BIT_MASK_INV
     sta HIT_GROUP1
     lda SPEED_ACCUM
     sta STATE_4D54
     lda $C7
-    bmi L9182
+    bmi DRAW_T00_F5_HOLD
     cmp #$32
-    bcs L9182
+    bcs DRAW_T00_F5_HOLD
     cmp #$1E
-    bcc L9186
+    bcc DRAW_T00_F5_TRIGGER
     lda $C6
     and #$7F
     cmp #$01
-    bcc L9192
-L9182:
+    bcc DRAW_T00_F5_POS
+DRAW_T00_F5_HOLD:
     inc STATE_9B
-    bne L918F
-L9186:
+    bne DRAW_T00_F5_TICK
+DRAW_T00_F5_TRIGGER:
     dec STATE_9B
     lda #$04
     sta $A0
     sta STATE_4D05
-L918F:
+DRAW_T00_F5_TICK:
     inc STATE_4D07
-L9192:
+DRAW_T00_F5_POS:
     dec STATE_4D08
     lda SPAWN_Y
     cmp #$65
-    bcs L91A8
+    bcs DRAW_T00_F5_DONE
     sec
     lda #$00
     sbc ROAD_X_REF
-    bpl L91A8
+    bpl DRAW_T00_F5_DONE
     cmp #$F8
-    beq L91A8
+    beq DRAW_T00_F5_DONE
     sta $B3
-L91A8:
-    jmp L91DC
+DRAW_T00_F5_DONE:
+    jmp DRAW_T00_TAIL
 DRAW_T00_F6:
     lda $C7
-    bmi L91CB
+    bmi DRAW_T00_F6_FAR
     cmp #$31
-    bcs L918F
+    bcs DRAW_T00_F5_TICK
     cmp #$27
-    bcc L91D4
+    bcc DRAW_T00_F6_DONE
     lda $C6
     and #$7F
     cmp #$01
-    bcs L918F
+    bcs DRAW_T00_F5_TICK
     sec
     ror ANIM_STATE
     inc STATE_4D54
     inc $B3
     dec STATE_9B
-    bne L918F
-L91CB:
+    bne DRAW_T00_F5_TICK
+DRAW_T00_F6_FAR:
     and #$7F
     cmp #$35
-    bcc L91D4
+    bcc DRAW_T00_F6_DONE
     inc STATE_4D07
-L91D4:
+DRAW_T00_F6_DONE:
     ldx SPEED_ACCUM
     dex
     stx STATE_4D54
     ldx OBJ_IDX
-L91DC:
+DRAW_T00_TAIL:
     jsr DRAW_TIMER_GATE
-    jmp L97F3
+    jmp DRAW_PROXIMITY_CHECK
 DRAW_T00_F7:
     lda #$58
     sta FLAG_FB
@@ -3667,14 +3840,14 @@ DRAW_T00_F7:
     lda SPAWN_Y
     cmp #$F0
     lda #$00
-    bcc L91FA
+    bcc DRAW_T00_F7_CHECK
     dec STATE_9B
     sta FLAG_FB
-L91FA:
+DRAW_T00_F7_CHECK:
     dec STATE_4D5C
-    bne L9201
+    bne DRAW_T00_F7_DONE
     sta STATE_9B
-L9201:
+DRAW_T00_F7_DONE:
     jmp DRAW_TIMER_GATE
 DRAW_T00_F8:
     lda #$DC
@@ -3685,33 +3858,33 @@ DRAW_T00_F8:
     sta SPR_XMSB
     lda SPAWN_Y
     cmp #$10
-    bcs L921B
+    bcs DRAW_T00_F8_CONT
     clc
     adc #$0C
     sta SPAWN_Y
-L921B:
+DRAW_T00_F8_CONT:
     lda SEQ_STATE
     cmp #$03
-    bne L922E
+    bne DRAW_T00_F8_SPRY_CHECK
     lda #$04
     sta STATE_9B
     ldx #$00
     stx FLAG_FB
-L9229:
+DRAW_T00_F8_DONE:
     ldx OBJ_IDX
     jmp DRAW_TIMER_GATE
-L922E:
+DRAW_T00_F8_SPRY_CHECK:
     lda $D003
     cmp #$F0
-    bcc L9229
+    bcc DRAW_T00_F8_DONE
     ror HERO_STATE
     rts
 DRAW_T00_F9:
     lda #$15
     cmp PREV_FEATURE
-    beq L9240
+    beq DRAW_T00_F9_CONT
     dec OBJ_ANIM,x
-L9240:
+DRAW_T00_F9_CONT:
     dec OBJ_ANIM,x
     lda #$00
     sta SPAWN_Y
@@ -3727,31 +3900,31 @@ DRAW_T04_F0:
     dec $B9
     lda $B9
     cmp #$0A
-    bne L9280
+    bne DRAW_T04_COMMIT
     ror ANIM_STATE
     rts
 DRAW_T04_F1:
     lda $A0
     cmp #$01
-    beq L9270
+    beq DRAW_T04_F1_DEC
     cmp #$04
-    beq L9270
+    beq DRAW_T04_F1_DEC
     lda STATE_9B
     cmp #$06
-    bcc L9272
-L9270:
+    bcc DRAW_T04_F1_CHECK
+DRAW_T04_F1_DEC:
     dec FLAG_A1
-L9272:
+DRAW_T04_F1_CHECK:
     lda $B9
-    bpl L9280
+    bpl DRAW_T04_COMMIT
 DRAW_T04_F2:
     inc $B9
     lda $B9
     cmp #$14
-    bne L9280
-L927E:
+    bne DRAW_T04_COMMIT
+DRAW_T04_DEC:
     dec FLAG_A1
-L9280:
+DRAW_T04_COMMIT:
     clc
     adc SPAWN_Y
     sta $D9
@@ -3759,25 +3932,25 @@ L9280:
     sta $D8
     lda SPR_XMSB
     and #$02
-    beq L9295
+    beq DRAW_T04_XMSB_CLR
     lda #$80
     ora SPR_XMSB
-    bne L9299
-L9295:
+    bne DRAW_T04_XMSB_STORE
+DRAW_T04_XMSB_CLR:
     lda #$7F
     and SPR_XMSB
-L9299:
+DRAW_T04_XMSB_STORE:
     sta SPR_XMSB
     lda HERO_STATE
     cmp #$04
-    bcc L92A3
+    bcc DRAW_T04_DONE
     ror ANIM_STATE
-L92A3:
+DRAW_T04_DONE:
     rts
 DRAW_T04_F3:
     lda #$0A
     sta $B9
-    bne L927E
+    bne DRAW_T04_DEC
 DRAW_TBL_T05:
     .word DRAW_T05_F0
     .word DRAW_T05_F1
@@ -3787,23 +3960,23 @@ DRAW_TBL_T05:
     .word DRAW_STATE_4D89_PREP
 DRAW_T05_F0:
     lda OBJ_TBL79
-    bne L92BE
+    bne DRAW_T05_F0_CHECK
     sta STATE_4D05
-L92BE:
+DRAW_T05_F0_CHECK:
     cmp #$09
-    bne L92CF
+    bne DRAW_T05_F0_SPEED
     sta STATE_4D05
     ror SCENE_ID
     inc STATE_4DC9
     lda #$03
     sta SEQ_STATE
     rts
-L92CF:
-    jsr $9979
-    jmp $86F7
+DRAW_T05_F0_SPEED:
+    jsr DRAW_GATE_CHECK_SPEED
+    jmp SPEEDCODE_IMAGE
 DRAW_T05_F1:
     lda ANIM_STATE
-    bpl L92ED
+    bpl DRAW_T05_F1_DONE
     lda #$00
     sta STATE_4D89
     sta STATE_4D0E
@@ -3813,71 +3986,71 @@ DRAW_T05_F1:
     lda #$02
     sta TIMER_ENABLE
     sta SEQ_STATE
-L92ED:
+DRAW_T05_F1_DONE:
     rts
 DRAW_T05_F2:
     inc SPEED_SUM
     lda SPEED_SUM
     cmp #$D1
-    bcc L9311
+    bcc DRAW_T05_F2_DONE
     dec $A0
     lda #$FF
     ldx HERO_STATE
-    beq L9311
+    beq DRAW_T05_F2_DONE
     dex
-    beq L930A
+    beq DRAW_T05_F2_GUNHEAT
     dex
-    beq L9307
+    beq DRAW_T05_F2_SMOKE
     sta MISSILE_CNT
     rts
-L9307:
+DRAW_T05_F2_SMOKE:
     sta SMOKE_CNT
     rts
-L930A:
+DRAW_T05_F2_GUNHEAT:
     clc
     lda GUN_HEAT
     adc #$03
     sta GUN_HEAT
-L9311:
+DRAW_T05_F2_DONE:
     rts
 DRAW_T05_F3:
     lda ANIM_STATE
     cmp #$04
-    bne L9320
+    bne DRAW_T05_F3_MERGE
     lda FLAG_A1
     cmp #$01
-    bne L9320
+    bne DRAW_T05_F3_MERGE
     dec $A0
-L9320:
+DRAW_T05_F3_MERGE:
     lda #$0A
 DRAW_ENTRY_9322:
     clc
     adc SPAWN_Y
     sta SPEED_SUM
-L9327:
+DRAW_T05_STEER_UPDATE:
     lda $CC
     sta STEER_SUM
     lda SPR_XMSB
     and #$02
-    beq L9337
+    beq DRAW_T05_XMSB_CLR
     lda #$40
     ora SPR_XMSB
-    bne L933B
-L9337:
+    bne DRAW_T05_XMSB_STORE
+DRAW_T05_XMSB_CLR:
     lda #$BF
     and SPR_XMSB
-L933B:
+DRAW_T05_XMSB_STORE:
     sta SPR_XMSB
     rts
 DRAW_T05_F4:
     lda SPEED_SUM
     sbc #$0A
     cmp SPAWN_Y
-    bcc L934C
+    bcc DRAW_T05_F4_START
     dec SPEED_SUM
     dec SPEED_SUM
-    bcs L9327
-L934C:
+    bcs DRAW_T05_STEER_UPDATE
+DRAW_T05_F4_START:
     ldx #$00
     stx TIMER_ENABLE
     inx
@@ -3921,31 +4094,31 @@ MUSIC_START_THEME:
 DRAW_STATE_4D89_PREP:
     lda SPEED_SUM
     cmp #$23
-    bcc L9372
+    bcc DRAW_PREP_ARM_BOAT
     cmp #$DC
-    bcc L9375
-L9372:
+    bcc DRAW_PREP_FRAME_CHECK
+DRAW_PREP_ARM_BOAT:
     inc STATE_4D89
-L9375:
+DRAW_PREP_FRAME_CHECK:
     lda FRAME_CTR
     lsr
-    bcc L9397
+    bcc DRAW_PREP_DONE
     lda #$07
     dec STATE_4D0E
-    bpl L9384
+    bpl DRAW_PREP_STEER_CHECK
     sta STATE_4D0E
-L9384:
+DRAW_PREP_STEER_CHECK:
     ldy STEER_ACCUM
-    bpl L938C
+    bpl DRAW_PREP_CALC_INDEX
     lda STATE_4D0E
     asl
-L938C:
+DRAW_PREP_CALC_INDEX:
     sec
     sbc STATE_4D0E
     tay
     lda DRAW_STATE_4D89_PREP_TBL,y
     jsr COMMIT_SPRITE_OFS
-L9397:
+DRAW_PREP_DONE:
     jmp DRAW_T0A_F0
 DRAW_STATE_4D89_PREP_TBL:
     .byte $00,$09,$05,$0B,$02,$0A,$04,$08
@@ -3956,77 +4129,77 @@ DRAW_TBL_T06:
 DRAW_T06_F0:
     lda OBJ_TBL79
     cmp #$09
-    bne L93BC
+    bne DRAW_T06_F0_CHECK
     inc $A0
     inc STATE_4DC9
     sta STATE_4D05
     lda #$03
     sta SEQ_STATE
     rts
-L93BC:
+DRAW_T06_F0_CHECK:
     lda #$15
     cmp ROAD_FEATURE
-    beq L93CC
+    beq DRAW_T06_F0_ARM
     cmp PREV_FEATURE
-    bne L9402
+    bne DRAW_T06_F0_DONE
     lda ROAD_FEATURE
     cmp #$0F
-    bne L9402
-L93CC:
+    bne DRAW_T06_F0_DONE
+DRAW_T06_F0_ARM:
     lda STATE_4DB9
     cmp #$13
-    bcc L9402
+    bcc DRAW_T06_F0_DONE
     sta STATE_4D05
     ldy #$00
     sty STATE_4D61
     cmp #$19
-    beq L93E4
-    bcc L93E3
+    beq DRAW_T06_F0_IDX_STORE
+    bcc DRAW_T06_F0_IDX_INC
     dey
     dey
-L93E3:
+DRAW_T06_F0_IDX_INC:
     iny
-L93E4:
+DRAW_T06_F0_IDX_STORE:
     sty STATE_4D0A
     ldy HERO_STATE
     cmp #$07
-    bne L93F2
+    bne DRAW_T06_F0_SPAWN
     sty STATE_4DAC
     inc SPAWN_Y
-L93F2:
+DRAW_T06_F0_SPAWN:
     ldy #$00
     lda SCROLL_SPEED
     cmp #$02
-    beq L93FF
-    bcc L93FE
+    beq DRAW_T06_F0_SPEED_STORE
+    bcc DRAW_T06_F0_SPEED_INC
     dey
     dey
-L93FE:
+DRAW_T06_F0_SPEED_INC:
     iny
-L93FF:
+DRAW_T06_F0_SPEED_STORE:
     sty JOY_STATE
-L9402:
-    jsr L998F
-    jmp $86F7
+DRAW_T06_F0_DONE:
+    jsr DRAW_CHECK_BLANK
+    jmp SPEEDCODE_IMAGE
 DRAW_T06_F1:
     lda SEQ_STATE
     cmp #$05
-    beq L9441
+    beq DRAW_T06_F1_SEQ5
     lda ROAD_X_REF
     eor #$FF
     clc
     adc #$01
     sta SPEED_ACCUM
     lda OBJ_TBL79
-    bne L9426
+    bne DRAW_T06_F1_WATER
     sec
     ror SCENE_ID
     lda #$01
     sta SEQ_STATE
-    jmp L9402
-L9426:
+    jmp DRAW_T06_F0_DONE
+DRAW_T06_F1_WATER:
     cmp #$02
-    bne L9402
+    bne DRAW_T06_F0_DONE
     dec $A0
     lda #$04
     sta SEQ_STATE
@@ -4036,12 +4209,12 @@ L9426:
     sta STATE_4DCB
     sta STATE_4D89
     sta STATE_4D05
-    beq L9402
-L9441:
+    beq DRAW_T06_F0_DONE
+DRAW_T06_F1_SEQ5:
     inc $A0
 DRAW_T06_F2:
     lda #$22
-    jmp $9322
+    jmp DRAW_ENTRY_9322
 DRAW_TBL_T09:
     .word DRAW_T09_F0
     .word DRAW_T09_F1
@@ -4049,21 +4222,21 @@ DRAW_TBL_T09:
 DRAW_T09_F0:
     lda #$01
     sta STATE_4DAC
-    jmp L97F3
+    jmp DRAW_PROXIMITY_CHECK
 DRAW_T09_F1:
     inc STATE_4D08
     lda $C7
-    bmi L946E
+    bmi DRAW_T09_F1_DONE
     cmp #$04
-    bcs L946E
+    bcs DRAW_T09_F1_DONE
     lda #$00
     sec
     sbc ROAD_X_REF
     sta OBJ_POS_Y,x
     dec STATE_4D08
     dec STATE_4D08
-L946E:
-    jmp L97F3
+DRAW_T09_F1_DONE:
+    jmp DRAW_PROXIMITY_CHECK
 DRAW_T09_F2:
     dec STATE_9B
     ldx #$01
@@ -4075,17 +4248,17 @@ DRAW_TBL_T0A:
     .word DRAW_T0A_F2
 DRAW_T0A_F2:
     dec OBJ_ANIM
-    bne L9493
+    bne DRAW_T0A_SET_COLOR
 DRAW_T0A_F1:
-    jsr L94B1
+    jsr DRAW_T0A_CALC_Y
     lda $B3
     sta OBJ_POS_Y
     lda $C7
-    bpl L9493
+    bpl DRAW_T0A_SET_COLOR
     and #$7F
     cmp #$28
-    bcc L94B9
-L9493:
+    bcc DRAW_T0A_TRIGGER
+DRAW_T0A_SET_COLOR:
     lda #$06
     sta VIC_SPR_COLOR
     lda SPR_XMSB
@@ -4100,54 +4273,54 @@ L9493:
     clc
     adc #$04
     sta SPR_X_SHADOW
-    bcc L94B1
+    bcc DRAW_T0A_CALC_Y
     lda BIT_MASK
     ora SPR_XMSB
     sta SPR_XMSB
-L94B1:
+DRAW_T0A_CALC_Y:
     lda SPAWN_Y
     clc
     adc #$0F
     sta SPR_Y_SHADOW
     rts
-L94B9:
+DRAW_T0A_TRIGGER:
     cmp #$14
-    bcs L94CA
+    bcs DRAW_T0A_SET_COLOR2
     ldy #$0C
     jsr SOUND_REQ_V1
     dec OBJ_ANIM
     lda SCENE_ID
-    bpl L94CA
+    bpl DRAW_T0A_SET_COLOR2
     dec STATE_9B
-L94CA:
+DRAW_T0A_SET_COLOR2:
     lda #$0A
     sta VIC_SPR_COLOR
     lda $C6
-    bpl L94E7
+    bpl DRAW_T0A_POS_RIGHT
     lda #$F6
     sta OBJ_POS_X
     lda $CC
     sec
     sbc #$02
     sta SPR_X_SHADOW
-    bcs L94FA
+    bcs DRAW_T0A_DONE
     lda SPR_XMSB
     lsr
     asl
     sta SPR_XMSB
     rts
-L94E7:
+DRAW_T0A_POS_RIGHT:
     lda #$0A
     sta OBJ_POS_X
     lda $CC
     clc
     adc #$0A
     sta SPR_X_SHADOW
-    bcc L94FA
+    bcc DRAW_T0A_DONE
     lda SPR_XMSB
     ora BIT_MASK
     sta SPR_XMSB
-L94FA:
+DRAW_T0A_DONE:
     rts
 DRAW_TBL_T0B:
     .word DRAW_T0B_F0
@@ -4159,25 +4332,25 @@ DRAW_T0B_F2:
     lda #$FB
     pha
     lda $BC
-    bmi L950D
+    bmi DRAW_T0B_F2_ALT
     lda #$02
     .byte $2C
-L950D:
+DRAW_T0B_F2_ALT:
     .byte $A9,$FE
     sta $B1
     lda #$78
-    bne L951A
+    bne DRAW_T0B_CHECK
 DRAW_T0B_F0:
     lda #$ED
     pha
     lda #$50
-L951A:
+DRAW_T0B_CHECK:
     cmp $D9
-    bcc L9520
+    bcc DRAW_T0B_COMMIT
     ror ANIM_STATE
-L9520:
+DRAW_T0B_COMMIT:
     pla
-    jmp L98FB
+    jmp DRAW_ADJUST_POS_Y
 DRAW_T0B_F1:
     dec FLAG_A1
     lda STEER_ACCUM
@@ -4197,30 +4370,30 @@ DRAW_T0B_F1:
     ldy #$10
     lda ANIM_STATE
     cmp #$0B
-    beq L9546
+    beq DRAW_T0B_F1_DONE
     ldy #$22
-L9546:
-    jmp $AA8A
+DRAW_T0B_F1_DONE:
+    jmp SOUND_REQ_V2
 DRAW_TBL_T0C:
     .word DRAW_T0C_F0
 DRAW_T0C_F0:
     lda $C7
-    bmi L9561
+    bmi DRAW_T0C_CHECK_TYPE
     cmp #$0F
-    bcs L955E
+    bcs DRAW_T0C_TICK
     inc OBJ_TBLAB,x
     lda STATE_4D05
-    bne L955E
+    bne DRAW_T0C_TICK
     inc STATE_4D07
-L955E:
+DRAW_T0C_TICK:
     inc STATE_4D08
-L9561:
+DRAW_T0C_CHECK_TYPE:
     lda OBJ_TYPE,x
     cmp #$0D
-    bne L956A
-    jsr L99B6
-L956A:
-    jmp L97F3
+    bne DRAW_T0C_DONE
+    jsr DRAW_PROX_SOUND
+DRAW_T0C_DONE:
+    jmp DRAW_PROXIMITY_CHECK
 DRAW_TBL_T0E:
     .word DRAW_T0E_F0
     .word DRAW_T0E_F1
@@ -4229,16 +4402,16 @@ DRAW_T0E_F0:
     lda $C7
     and #$7F
     cmp #$14
-    bcs L9580
+    bcs DRAW_T0E_F0_DONE
     lda #$01
     sta OBJ_TBLAB,x
-L9580:
-    jmp L97F3
+DRAW_T0E_F0_DONE:
+    jmp DRAW_PROXIMITY_CHECK
 DRAW_T0E_F1:
     dec OBJ_TBL5B,x
-    bne L958B
+    bne DRAW_T0E_F1_TICK
     inc STATE_4D83,x
-L958B:
+DRAW_T0E_F1_TICK:
     lda FRAME_CTR
     lsr
     lsr
@@ -4246,14 +4419,14 @@ L958B:
     tay
     lda DRAW_T0E_F2_TBL,y
     cmp OBJ_TBL33,x
-    beq L95A9
-    jsr L99D5
-    lda $95B1,y
+    beq DRAW_T0E_F1_DONE
+    jsr DRAW_STORE_OFS
+    lda DRAW_T0E_F2_TBL+4,y
     ldy OBJ_IDX2
     clc
     adc SPR_X_SHADOW,y
     sta SPR_X_SHADOW,y
-L95A9:
+DRAW_T0E_F1_DONE:
     ldy OBJ_IDX2
     bpl DRAW_T0E_F0
 DRAW_T0E_F2_TBL:
@@ -4272,48 +4445,48 @@ DRAW_T11_F0:
     sta HIT_GROUP2
     lda #$00
     dec STATE_4D5C
-    bne L95E8
-    beq L95E5
+    bne DRAW_T11_DONE
+    beq DRAW_T11_TRIGGER
 DRAW_T11_F1:
     lda FLAG_FC
-    bne L95E5
+    bne DRAW_T11_TRIGGER
     lda #$0F
     sta STATE_4D5C
     lda SPAWN_Y
     cmp #$F3
     txa
     sta FLAG_FB
-    bcc L95E8
-L95E5:
+    bcc DRAW_T11_DONE
+DRAW_T11_TRIGGER:
     sec
     ror HERO_STATE
-L95E8:
+DRAW_T11_DONE:
     jmp COMMIT_SPRITE_OFS
 DRAW_TBL_T12:
     .word DRAW_T12_F0
     .word DRAW_T12_F1
 DRAW_T12_F0:
     lda $C7
-    bmi L95F6
+    bmi DRAW_T12_HAZARD
     inc STATE_4D07
-L95F6:
-    jsr $99E3
-    jmp L97FB
+DRAW_T12_HAZARD:
+    jsr DRAW_HAZARD_ENTRY
+    jmp DRAW_PROXIMITY_SCAN
 DRAW_T12_F1:
     lda STATE_4D05
     bne DRAW_T12_F0
     lda OBJ_TBL5B,x
-    bmi L960B
+    bmi DRAW_T12_F1_CHECK
     inc OBJ_TBL5B,x
     bpl DRAW_T12_F0
-L960B:
+DRAW_T12_F1_CHECK:
     lda $C7
-    bmi L95F6
+    bmi DRAW_T12_HAZARD
     lda $C6
     and #$7F
     cmp #$0F
     bcs DRAW_T12_F0
-    jsr $A2C6
+    jsr ATTRACT_HELPER_ADVANCE_B
     lda #$26
     sta OBJ_TBL5B,x
     sta OBJ_TBLAB,x
@@ -4324,30 +4497,30 @@ DRAW_TBL_T14:
     .word DRAW_T14_F2
 DRAW_T14_F0:
     dec OBJ_TBL5B,x
-    bne L9632
+    bne DRAW_T14_TICK
     sec
     ror OBJ_TYPE,x
-L9632:
+DRAW_T14_TICK:
     lda FRAME_CTR
     and #$03
     pha
     jsr COMMIT_SPRITE_OFS
     pla
-    bne L9645
+    bne DRAW_T14_DONE
     inc OBJ_POS_Y,x
-    bmi L9645
-    beq L9645
+    bmi DRAW_T14_DONE
+    beq DRAW_T14_DONE
     dec OBJ_POS_Y,x
-L9645:
+DRAW_T14_DONE:
     jmp DRAW_T0A_F0
 DRAW_T14_F1:
     lda #$1E
     sta OBJ_TBL5B,x
     dec OBJ_ANIM,x
-    bpl L9632
+    bpl DRAW_T14_TICK
 DRAW_T14_F2:
     lda #$01
-    jsr $A106
+    jsr SPEED_SET
     lda #$FE
     sta OBJ_POS_Y,x
 DRAW_T15_F5:
@@ -4358,9 +4531,9 @@ DRAW_T15_F5:
     lda SPR_XMSB
     asl
     sec
-    bmi L9669
+    bmi DRAW_T15_F5_SIGN
     clc
-L9669:
+DRAW_T15_F5_SIGN:
     ror
     sta SPR_XMSB
     dec OBJ_ANIM,x
@@ -4380,9 +4553,9 @@ DRAW_T15_F1:
     dec OBJ_TBL5B,x
     lda OBJ_TBL5B,x
     and #$07
-    beq L968E
+    beq DRAW_T15_F1_DONE
     rts
-L968E:
+DRAW_T15_F1_DONE:
     dec OBJ_ANIM,x
     lda SPR_Y_SHADOW,y
     clc
@@ -4394,9 +4567,9 @@ DRAW_T15_F2:
     dec OBJ_TBL5B,x
     lda OBJ_TBL5B,x
     and #$07
-    beq L96A9
+    beq DRAW_T15_F2_DONE
     rts
-L96A9:
+DRAW_T15_F2_DONE:
     dec OBJ_ANIM,x
     lda #$04
     sta VIC_SPR_COLOR,x
@@ -4406,30 +4579,30 @@ DRAW_T15_F3:
     dec OBJ_TBL5B,x
     lda OBJ_TBL5B,x
     and #$07
-    bne L96CB
+    bne DRAW_T15_F3_CHECK
     lda #$01
-    jsr $A106
+    jsr SPEED_SET
     dec OBJ_ANIM,x
     lda #$89
     jmp SET_SPRITE_PTR
-L96CB:
+DRAW_T15_F3_CHECK:
     and #$03
-    bne L96D6
-L96CF:
+    bne DRAW_T15_F3_DONE
+DRAW_T15_SPEED_TICK:
     ldy #$07
-    jsr $A0EE
+    jsr SPEED_STEP_DOWN
     lda #$00
-L96D6:
+DRAW_T15_F3_DONE:
     jmp COMMIT_SPRITE_OFS
 DRAW_T15_F4:
     jsr SOUND_SILENCE
     ldy #$1E
-    jsr $AA8A
+    jsr SOUND_REQ_V2
     ldy OBJ_IDX2
     lda #$2F
     sta OBJ_TBL5B,x
     dec OBJ_ANIM,x
-    bpl L96CF
+    bpl DRAW_T15_SPEED_TICK
 DRAW_TBL_T16:
     .word DRAW_T16_F0
     .word DRAW_T16_F1
@@ -4437,21 +4610,21 @@ DRAW_TBL_T16:
     .word DRAW_T15_F5
 DRAW_T16_F0:
     dec OBJ_TBL5B,x
-    bne L970D
+    bne DRAW_T16_SPEED
     sec
     ror OBJ_TYPE,x
-    bne L9712
+    bne DRAW_T16_DONE
 DRAW_T16_F1:
     dec OBJ_TBL5B,x
-    bne L970D
+    bne DRAW_T16_SPEED
     lda #$1E
     sta OBJ_TBL5B,x
     dec OBJ_ANIM,x
     dec SPRITE_PTRS,x
-L970D:
+DRAW_T16_SPEED:
     lda #$01
-    jsr $A106
-L9712:
+    jsr SPEED_SET
+DRAW_T16_DONE:
     jmp DRAW_T0A_F0
 DRAW_T16_F2:
     lda #$1E
@@ -4465,43 +4638,43 @@ DRAW_TBL_T18:
 DRAW_T18_F0:
     lda ROAD_FEATURE
     cmp #$15
-    bne L9731
+    bne DRAW_T18_F0_CHECK
     dec STATE_4D08
     lda #$01
     sta $B3
-L9731:
+DRAW_T18_F0_CHECK:
     lda #$01
     sta STATE_4DAC
-    bne L9761
+    bne DRAW_T18_DONE
 DRAW_T18_F2:
     lda #$F4
     sta SPEED_SUM
     lda #$01
-    jsr $A106
+    jsr SPEED_SET
     inc STATE_4D5C
-    bmi L9747
+    bmi DRAW_T18_F2_TRIGGER
     rts
-L9747:
+DRAW_T18_F2_TRIGGER:
     ldy #$20
     jsr SOUND_REQ_V0B
     dec STATE_9B
 DRAW_T18_F1:
     lda SPAWN_Y
     cmp #$A0
-    bcs L975D
+    bcs DRAW_T18_F1_ALT
     dec STATE_9B
     lda #$04
     sta SEQ_STATE
     lda #$01
     .byte $2C
-L975D:
+DRAW_T18_F1_ALT:
     .byte $A9,$02
     sta $A0
-L9761:
-    jsr $99EB
+DRAW_T18_DONE:
+    jsr DRAW_HAZARD_ENTRY_B
     lda #$00
     sta $AB
-    jmp L97FB
+    jmp DRAW_PROXIMITY_SCAN
 DRAW_TBL_T19:
     .word DRAW_T19_F0
     .word DRAW_T19_F1
@@ -4529,19 +4702,19 @@ DRAW_T19_F0:
 DRAW_T19_F1:
     inc OBJ_POS_Y
     dec OBJ_TBL5B
-    bne L9797
+    bne DRAW_T19_F1_POS
     dec OBJ_ANIM
-L9797:
+DRAW_T19_F1_POS:
     clc
     lda SPAWN_Y
     adc OBJ_POS_Y
     sta SPR_Y_SHADOW
     lda HERO_STATE
     cmp #$18
-    beq L97A7
+    beq DRAW_T19_DONE
     sec
     ror OBJ_TYPE
-L97A7:
+DRAW_T19_DONE:
     rts
 DRAW_TBL_T1A:
     .word DRAW_T1A_F0
@@ -4558,9 +4731,9 @@ DRAW_T1A_F1:
     lda SPR_XMSB
     and #$08
     clc
-    beq L97C7
+    beq DRAW_T1A_F1_SIGN
     sec
-L97C7:
+DRAW_T1A_F1_SIGN:
     php
     lda SPR_XMSB
     lsr
@@ -4575,54 +4748,54 @@ L97C7:
     adc #$05
     sta SPR_Y_SHADOW
     lda $C7
-    bpl L97F2
+    bpl DRAW_T1A_F1_DONE
     lda #$FA
     sta OBJ_POS_Y
     lda $C6
     and #$7F
     cmp #$04
-    bcs L97F2
+    bcs DRAW_T1A_F1_DONE
     dec OBJ_ANIM
     ldy #$2A
     jsr SOUND_REQ_V1
-L97F2:
+DRAW_T1A_F1_DONE:
     rts
-L97F3:
+DRAW_PROXIMITY_CHECK:
     lda ROAD_FEATURE
     cmp #$03
-    bne L97FB
+    bne DRAW_PROXIMITY_SCAN
     inc OBJ_POS_Y,x
-L97FB:
+DRAW_PROXIMITY_SCAN:
     ldy #$0C
     lda OBJ_TYPE,x
     cmp #$04
-    bcs L9805
+    bcs DRAW_PROX_SETUP
     ldy #$0E
-L9805:
+DRAW_PROX_SETUP:
     sty ZTMP_09
     ldy #$00
     sty ZTMP_08
     sty ZTMP_0B
     iny
-    bne L9811
-L9810:
+    bne DRAW_PROX_LOOP
+DRAW_PROX_SKIP:
     plp
-L9811:
+DRAW_PROX_LOOP:
     iny
     cpy ZTMP_09
-    beq L983C
+    beq DRAW_PROX_DONE
     cpy OBJ_IDX2
-    bne L981D
+    bne DRAW_PROX_TEST
     iny
-    bne L9811
-L981D:
+    bne DRAW_PROX_LOOP
+DRAW_PROX_TEST:
     lda SPR_STAGE,y
     iny
     asl
     php
     lsr
     cmp #$15
-    bcs L9810
+    bcs DRAW_PROX_SKIP
     lsr ZTMP_0B
     plp
     rol ZTMP_0B
@@ -4631,116 +4804,116 @@ L981D:
     php
     lsr
     cmp #$23
-    bcs L9810
+    bcs DRAW_PROX_SKIP
     plp
-    bcc L9811
+    bcc DRAW_PROX_LOOP
     rol ZTMP_08
-L983C:
+DRAW_PROX_DONE:
     ldy OBJ_IDX2
     lda STATE_4D07
-    bne L984B
+    bne DRAW_PROX_STATE_CHECK
     lda FRAME_CTR
     lsr
-    bcc L984B
+    bcc DRAW_PROX_STATE_CHECK
     jmp DRAW_T0A_F0
-L984B:
+DRAW_PROX_STATE_CHECK:
     lda OBJ_TBL8B,x
-    beq L9859
+    beq DRAW_PROX_DISPATCH
     lda OBJ_POS_X,x
-    bne L9856
+    bne DRAW_PROX_NUDGE_DONE
     inc OBJ_POS_X,x
-L9856:
+DRAW_PROX_NUDGE_DONE:
     jmp DRAW_T0A_F0
-L9859:
+DRAW_PROX_DISPATCH:
     lda ZTMP_08
-    beq L98A0
+    beq DRAW_MOVE_ENTRY
     lda ZTMP_0B
-    beq L9879
+    beq DRAW_MOVE_X_NEG
     lda OBJ_TBL6B,x
     cmp OBJ_TBL7B,x
-    bne L988F
-L9869:
+    bne DRAW_MOVE_Y_CHECK
+DRAW_MOVE_X_POS:
     lda OBJ_POS_X,x
-    bmi L9874
+    bmi DRAW_MOVE_X_INC
     cmp OBJ_TBL43,x
-    beq L9876
-    bcs L988A
-L9874:
+    beq DRAW_MOVE_X_DONE_POS
+    bcs DRAW_MOVE_X_DEC
+DRAW_MOVE_X_INC:
     inc OBJ_POS_X,x
-L9876:
+DRAW_MOVE_X_DONE_POS:
     jmp DRAW_T0A_F0
-L9879:
+DRAW_MOVE_X_NEG:
     lda OBJ_TBL63,x
     cmp OBJ_TBL7B,x
-    bne L988F
-L9881:
+    bne DRAW_MOVE_Y_CHECK
+DRAW_MOVE_X_CHECK:
     lda OBJ_POS_X,x
     cmp OBJ_TBL3B,x
-    beq L988C
-    bmi L9874
-L988A:
+    beq DRAW_MOVE_X_DONE_NEG
+    bmi DRAW_MOVE_X_INC
+DRAW_MOVE_X_DEC:
     dec OBJ_POS_X,x
-L988C:
+DRAW_MOVE_X_DONE_NEG:
     jmp DRAW_T0A_F0
-L988F:
+DRAW_MOVE_Y_CHECK:
     lda OBJ_POS_Y,x
     cmp OBJ_TBL4B,x
-    bpl L9898
+    bpl DRAW_MOVE_X_SIGN
     inc OBJ_POS_Y,x
-L9898:
+DRAW_MOVE_X_SIGN:
     lda OBJ_POS_X,x
     beq DRAW_T0A_F0
-    bmi L9874
-    bpl L988A
-L98A0:
+    bmi DRAW_MOVE_X_INC
+    bpl DRAW_MOVE_X_DEC
+DRAW_MOVE_ENTRY:
     lda STATE_4D08
-    bmi L98BF
+    bmi DRAW_MOVE_DISPATCH
     clc
-    beq L98A9
+    beq DRAW_MOVE_FRAME_GATE
     sec
-L98A9:
+DRAW_MOVE_FRAME_GATE:
     lda FRAME_CTR
     and #$07
-    bne L98BF
-    bcs L98DC
-L98B1:
+    bne DRAW_MOVE_DISPATCH
+    bcs DRAW_MOVE_PROXIMITY
+DRAW_MOVE_Y_ALT:
     lda OBJ_POS_Y,x
     cmp OBJ_TBL53,x
-    bmi L98BD
+    bmi DRAW_MOVE_Y_INC
     dec OBJ_POS_Y,x
-    jmp L98BF
-L98BD:
+    jmp DRAW_MOVE_DISPATCH
+DRAW_MOVE_Y_INC:
     inc OBJ_POS_Y,x
-L98BF:
+DRAW_MOVE_DISPATCH:
     lda OBJ_TBL63,x
     cmp OBJ_TBL7B,x
-    bne L9869
+    bne DRAW_MOVE_X_POS
     lda OBJ_TBL6B,x
     cmp OBJ_TBL7B,x
-    bne L9881
+    bne DRAW_MOVE_X_CHECK
     lda STATE_4D07
-    beq L9898
+    beq DRAW_MOVE_X_SIGN
     lda $C6
-    beq L9898
-    bpl L9869
-    bmi L9881
-L98DC:
+    beq DRAW_MOVE_X_SIGN
+    bpl DRAW_MOVE_X_POS
+    bmi DRAW_MOVE_X_CHECK
+DRAW_MOVE_PROXIMITY:
     lda $C7
-    beq L98BF
-    bmi L98B1
+    beq DRAW_MOVE_DISPATCH
+    bmi DRAW_MOVE_Y_ALT
     cmp #$05
-    bcc L98BF
+    bcc DRAW_MOVE_DISPATCH
     lda #$00
     sec
     sbc ROAD_X_REF
     cmp OBJ_POS_Y,x
-    bmi L98BF
+    bmi DRAW_MOVE_DISPATCH
     lda OBJ_POS_Y,x
     cmp OBJ_TBL4B,x
-    bpl L98BF
+    bpl DRAW_MOVE_DISPATCH
     inc OBJ_POS_Y,x
-    jmp L98BF
-L98FB:
+    jmp DRAW_MOVE_DISPATCH
+DRAW_ADJUST_POS_Y:
     sec
     sbc ROAD_X_REF
     sta OBJ_POS_Y,x
@@ -4752,23 +4925,23 @@ DRAW_T0A_F0:
     clc
     adc SPR_X_SHADOW,y
     sta SPR_X_SHADOW,y
-    bcs L9915
+    bcs DRAW_T0A_XMSB_CHECK
     plp
-    bmi L9918
-    bpl L991E
-L9915:
+    bmi DRAW_T0A_XMSB_TOGGLE
+    bpl DRAW_T0A_Y_POS
+DRAW_T0A_XMSB_CHECK:
     plp
-    bmi L991E
-L9918:
+    bmi DRAW_T0A_Y_POS
+DRAW_T0A_XMSB_TOGGLE:
     lda BIT_MASK
     eor SPR_XMSB
     sta SPR_XMSB
-L991E:
+DRAW_T0A_Y_POS:
     lda OBJ_TBL73,x
-    bpl L9926
+    bpl DRAW_T0A_TBL73_CHECK
     sec
     ror OBJ_TYPE,x
-L9926:
+DRAW_T0A_TBL73_CHECK:
     lda OBJ_POS_Y,x
     pha
     lda SPR_Y_SHADOW,y
@@ -4779,75 +4952,76 @@ L9926:
     clc
     adc ROAD_X_REF
     cpx #$0C
-    bcc L9946
+    bcc DRAW_T0A_Y_LOW
     cpx #$F3
-    bcc L994D
+    bcc DRAW_T0A_Y_STORE
     cmp #$E9
-    jsr L9951
-    bcc L9950
-    bcs L994D
-L9946:
+    jsr DRAW_T0A_CLEAR_FLAG
+    bcc DRAW_T0A_Y_DONE
+    bcs DRAW_T0A_Y_STORE
+DRAW_T0A_Y_LOW:
     cmp #$16
-    jsr L9951
-    bcs L9950
-L994D:
+    jsr DRAW_T0A_CLEAR_FLAG
+    bcs DRAW_T0A_Y_DONE
+DRAW_T0A_Y_STORE:
     sta SPR_Y_SHADOW,y
-L9950:
+DRAW_T0A_Y_DONE:
     rts
-L9951:
+DRAW_T0A_CLEAR_FLAG:
     php
     pha
     ldx OBJ_IDX
     lda OBJ_TBLAB,x
-    beq L9962
+    beq DRAW_T0A_CLEAR_DONE
     lda #$00
     sta OBJ_TBLAB,x
     sec
     ror OBJ_TYPE,x
-L9962:
+DRAW_T0A_CLEAR_DONE:
     pla
     plp
     rts
 DRAW_TIMER_GATE:
     lda FRAME_CTR
     and #$03
-    beq L996C
+    beq DRAW_GATE_CHECK
     rts
-L996C:
+DRAW_GATE_CHECK:
     lda STATE_9B
     cmp #$02
     lda #$04
-    bcc L998C
+    bcc DRAW_GATE_DONE
     eor STATE_4D34
-    bpl L998C
+    bpl DRAW_GATE_DONE
+DRAW_GATE_CHECK_SPEED:
     lda SCROLL_SPEED
-    beq L998C
+    beq DRAW_GATE_DONE
     lda OBJ_TBL79
-    beq L998C
+    beq DRAW_GATE_DONE
     ldy #$0E
-    jsr $AA86
+    jsr SOUND_REQ_V2_SAFE
     lda STATE_4D39
     eor #$01
-L998C:
-    jmp L99D5
-L998F:
+DRAW_GATE_DONE:
+    jmp DRAW_STORE_OFS
+DRAW_CHECK_BLANK:
     lda $A0
-    beq L9997
+    beq DRAW_CALC_BLINK
     lda #$95
     bne SET_SPRITE_PTR
-L9997:
+DRAW_CALC_BLINK:
     sec
     lda #$04
     sbc SCROLL_SPEED
     tay
     lda #$00
-L999F:
+DRAW_BLINK_LOOP:
     dey
-    bmi L99A6
+    bmi DRAW_BLINK_APPLY
     sec
     rol
-    bne L999F
-L99A6:
+    bne DRAW_BLINK_LOOP
+DRAW_BLINK_APPLY:
     and FRAME_CTR
     bne DRAW_DISPATCH_99D8
     dec STATE_4D39
@@ -4855,15 +5029,15 @@ L99A6:
     lda #$02
     sta STATE_4D39
     bpl DRAW_DISPATCH_99D8
-L99B6:
+DRAW_PROX_SOUND:
     ldy OBJ_IDX2
     lda SEQ_STATE
     cmp #$02
-    bcc L99D3
+    bcc DRAW_ZERO_OFS
     lda $C7
     and #$7F
     cmp #$1E
-    bcs L99D3
+    bcs DRAW_ZERO_OFS
     ldy #$18
     jsr SOUND_REQ_V0
 DRAW_DISPATCH_99CB:
@@ -4871,9 +5045,9 @@ DRAW_DISPATCH_99CB:
     bpl DRAW_DISPATCH_99D8
     lda #$02
     .byte $2C
-L99D3:
+DRAW_ZERO_OFS:
     .byte $A9,$00
-L99D5:
+DRAW_STORE_OFS:
     sta OBJ_TBL33,x
 DRAW_DISPATCH_99D8:
     lda OBJ_TBL33,x
@@ -4896,17 +5070,20 @@ SET_SPRITE_PTR:
 ; (built per-frame in PROCESS_OBJECTS, Stage 5) finally get consumed, and
 ; that SCORE_EVENT gets queued from ARM_SCORE_EVENT.
 ;
-; The 7 instructions below are the tail of a different, still-undissected
-; fragment that happens to sit immediately before this block (its branches
-; target addresses earlier than this block, inside the OBJ_MOVE_DISPATCH
-; data above) - not part of any MOVE handler here, so left unlabelled.
+; DRAW_HAZARD_ENTRY: a frame-parity dispatcher into the DRAW-side sprite-
+; offset commit tail (DRAW_DISPATCH_99D8/DRAW_DISPATCH_99CB/COMMIT_SPRITE_OFS,
+; in the per-object draw-handler block above) - called from DRAW_T12 (the
+; boat/water-type draw frames) as their hazard-check entry point. Not part
+; of any MOVE handler here despite sitting right before one.
+DRAW_HAZARD_ENTRY:
     lda FRAME_CTR
     and #$03
-    bne $99D8
-    beq $99CB
+    bne DRAW_DISPATCH_99D8
+    beq DRAW_DISPATCH_99CB
+DRAW_HAZARD_ENTRY_B:
     lda FRAME_CTR
     and #$01
-    bpl $99DB
+    bpl COMMIT_SPRITE_OFS
 ; Type $05/$06 MOVE handler - the boat. STATE_4D05 is a per-boat "crash/
 ; special-sequence in progress" flag; STATE_4DB9 is the same blit-column
 ; state var UPDATE_WEAPONS uses.
@@ -4998,8 +5175,8 @@ MOVE_BOAT_SEQ_LO:
 MOVE_BOAT_SEQ_ARM:
     .byte $A0,$24
     sta SEQ_STATE
-    jsr $AAA8
-    jmp $AA8A
+    jsr SOUND_SILENCE
+    jmp SOUND_REQ_V2
 ; Type $07's own (short) MOVE handler - a separate routine, not a
 ; continuation of the boat logic above (confirmed via the OBJINIT_PARAM_TBL
 ; vector table: type $07 move = $9A80 exactly). Candidate: a short-lived
@@ -5007,7 +5184,7 @@ MOVE_BOAT_SEQ_ARM:
 MOVE_TYPE_07:
     lda STATE_4D83,x
     beq MOVE_TYPE_07_DONE
-    jsr $AAA8
+    jsr SOUND_SILENCE
     ldx #$05
     jmp ARM_SCORE_EVENT
 MOVE_TYPE_07_DONE:
@@ -5071,7 +5248,7 @@ MOVE_TYPE_0C:
     dec STATE_4D83,x
     bne MOVE_TYPE_0C_RETRY
     ldy #$28
-    jsr $AA7E
+    jsr SOUND_REQ_V1_SAFE
 ; Shared tail for the handlers above: run the hazard-check chain against
 ; this slot's nearby tile codes; on a match, consume HIT_MASK_A; on a full
 ; miss, jump to the sprite-position "swap" / sound-effect helper instead.
@@ -5121,7 +5298,7 @@ MOVE_TYPE_0B_APPLY:
     sta OBJ_POS_X,y
     dec STATE_9B
     ldy #$16
-    jsr $AA86
+    jsr SOUND_REQ_V2_SAFE
 MOVE_TYPE_0B_RTS:
     rts
 ; Types $1A/$0A share this handler via another BIT-skip overlap entry (see
@@ -5234,9 +5411,9 @@ ARM_SCORE_EVENT_X8:
 ; - then fall into the position-preserve + sound-effect helper below.
 ARM_SCORE_EVENT:
     inc SCORE_EVENT,x
-; Preserve this object's OBJ_POS_X/OBJ_POS_Y across a call to $8D2B (push,
+; Preserve this object's OBJ_POS_X/OBJ_POS_Y across a call to TYPE_KILL_FX (push,
 ; call, pop back unchanged - not a swap, despite first appearances), then
-; queue sound effect $1E via $AA86. Shared tail for several handlers above;
+; queue sound effect $1E via SOUND_REQ_V2_SAFE. Shared tail for several handlers above;
 ; the trailing two extra PLAs balance pushes made by the (unseen) caller
 ; before it dispatched into this MOVE-handler block.
 TRIGGER_SWAP_FX:
@@ -5245,16 +5422,16 @@ TRIGGER_SWAP_FX:
     pha
     lda OBJ_POS_Y,x
     pha
-    jsr $8D2B
+    jsr TYPE_KILL_FX
     pla
     sta OBJ_POS_Y,x
     pla
     sta OBJ_POS_X,x
     ldy #$1E
-    jsr $AA86
+    jsr SOUND_REQ_V2_SAFE
     pla
     pla
-    jmp $8AB0
+    jmp TYPE_DISPATCH
 ; Consume one bit of a caller-supplied collision mask (A = HIT_MASK_A or
 ; HIT_MASK_B on entry): for this object slot (x = OBJ_IDX) paired against
 ; each other slot (y = 0..7), compare the clamped sprite-distance values
@@ -5392,7 +5569,7 @@ HIT_RESOLVE_TYPE0D_CHECK:
     tya
     pha
     ldy #$26
-    jsr $AA82
+    jsr SOUND_REQ_V1
     pla
     tay
     bne HIT_RESOLVE_SWAPXY
@@ -5499,7 +5676,7 @@ HIT_RESOLVE_TAIL:
     dec SPR_Y_SHADOW,x
     ldx OBJ_IDX
     ldy #$2C
-    jsr $AA86
+    jsr SOUND_REQ_V2_SAFE
     lda BIT_MASK
     ora ZTMP_0C
     jmp CONSUME_HIT_MASK_A_CONT
@@ -6411,8 +6588,15 @@ JOY1_HORIZ_DONE:
 ; title/menu screens cycle. This is the $A189 handler referenced above
 ; (GAME_STATE=0 dispatch target) - not part of the control-scheme question,
 ; but sits in the same data block and is now fully traced too. Uses
-; RNG_NEXT for randomness and reads OBJ_TBL69/OBJ_TBL71 (slot 0, unindexed)
-; and SCROLL_SPEED as pacing/decision inputs (???: exact demo-AI logic).
+; RNG_NEXT for randomness and reads OBJ_TBL69/OBJ_TBL71 (slot 0, unindexed -
+; i.e. SLOT0_HERO_WATCH's own tile/hazard-classification bytes, confirmed
+; this session via OBJ_CALC_SCREEN_POS/HAZARD_CHECK_* and the boat-mode-flag
+; finding in claude/Enemy_Scoring_Notes.md) and SCROLL_SPEED as pacing/
+; decision inputs. Both compares are against 0 (plain/clear terrain), which
+; fits the original guess: steer randomly but differently depending on
+; whether the demo car's slot is currently over a hazard/non-plain tile,
+; rather than a purely cosmetic random wobble (???: exact demo-AI logic
+; beyond that framing).
 ATTRACT_AUTODRIVE:
     jsr RNG_NEXT
     and #$03
@@ -6420,7 +6604,7 @@ ATTRACT_AUTODRIVE:
     lda #$00
     tay
     tax
-    cmp OBJ_TBL71            ; (???) slot 0's hazard/state byte, read bare
+    cmp OBJ_TBL71            ; slot 0's tile/hazard-classification byte (see header)
     bne AUTODRIVE_HORIZ_A
     cmp OBJ_TBL69
     bne AUTODRIVE_HORIZ_B
@@ -6659,13 +6843,13 @@ ATTRACT_HELPER_TBL:
     .byte $9E,$9F,$A0,$A1,$A2
 ATTRACT_HELPER:
     dec OBJ_TBL5B,x
-    bne LA2AB
+    bne ATTRACT_HELPER_RTS
     lda FLAG_FF
     bmi ATTRACT_HELPER_ADVANCE
     bne ATTRACT_HELPER_ARM
-LA2A8:
+ATTRACT_HELPER_REARM:
     inc OBJ_TBL5B,x
-LA2AB:
+ATTRACT_HELPER_RTS:
     rts
 ATTRACT_HELPER_ARM:
     lda #$FF
@@ -6680,21 +6864,22 @@ ATTRACT_HELPER_ADVANCE:
     sta FLAG_FF
     ldy #$1E
     jsr SOUND_REQ_V1
+ATTRACT_HELPER_ADVANCE_B:
     lda BLIT_ROWS
-    bne LA2A8
+    bne ATTRACT_HELPER_REARM
     lda #$98
     sta STREAM_PTR
     lda #$A2
     sta STREAM_PTR_HI
     ldy #$01
-    lda OBJ_TBL73,x
-    cmp #$02
-    beq LA2E2
-    iny
-    inc STREAM_PTR
-    bne LA2E2
+    lda OBJ_TBL73,x         ; this slot's tile-classification byte - $02 is
+    cmp #$02                 ;   the confirmed boat-mode flag (Boat_River_Notes.md)
+    beq ATTRACT_HELPER_POS    ; boat-mode -> read ATTRACT_HELPER_TBL from Y=1;
+    iny                        ;   otherwise nudge the pointer/index by one
+    inc STREAM_PTR              ;   (Y=2, table+1) - selects between two
+    bne ATTRACT_HELPER_POS       ;   adjacent table entries by boat/road context
     inc STREAM_PTR_HI
-LA2E2:
+ATTRACT_HELPER_POS:
     clc
     lda OBJ_TBLB3,x
     adc #$01
@@ -6704,11 +6889,11 @@ LA2E2:
     sta BLIT_ROW
     cmp #$14
     lda #$00
-    bcs LA2FD
+    bcs ATTRACT_HELPER_NOBLIT
     sta OBJ_COLOR
     sty BLIT_WIDTH
     sty BLIT_ROWS
-LA2FD:
+ATTRACT_HELPER_NOBLIT:
     .byte $2C
 ATTRACT_HELPER_ROWS:
     .byte $A9,$A0
@@ -7393,63 +7578,63 @@ SEGMENT_FX_FEATURE_TBL:
     .byte $17,$10,$15,$11,$0C,$1B,$0A,$1C,$12,$21,$10,$22
 SEGMENT_FX_HELPER:
     lda BLIT_ROWS
-    bne LA838
+    bne SEGMENT_FX_HELPER_RTS
     lda #$04
     cmp ROAD_FEATURE
-    bcs LA7D3
+    bcs SEGMENT_FX_USE_CURRENT
     cmp PREV_FEATURE
-    bcc LA838
+    bcc SEGMENT_FX_HELPER_RTS
     lda PREV_FEATURE
-    bpl LA7D5
-LA7D3:
+    bpl SEGMENT_FX_CALC_INDEX
+SEGMENT_FX_USE_CURRENT:
     lda ROAD_FEATURE
-LA7D5:
+SEGMENT_FX_CALC_INDEX:
     asl
     asl
     tay
-    bne LA7E1
+    bne SEGMENT_FX_CHECK_A
     lda OBJ_TBLB3,x
     cmp #$14
-    bcc LA7FC
-LA7E1:
+    bcc SEGMENT_FX_CHECK_B
+SEGMENT_FX_CHECK_A:
     lda OBJ_TBLB3,x
     cmp #$0A
-    bcc LA838
+    bcc SEGMENT_FX_HELPER_RTS
     cmp #$23
-    bcs LA838
+    bcs SEGMENT_FX_HELPER_RTS
     sec
     sbc SEGMENT_FX_FEATURE_TBL,y
     clc
     adc #$04
-    bmi LA7F9
+    bmi SEGMENT_FX_RELOAD_B
     cmp #$08
-    bcc LA80A
-LA7F9:
+    bcc SEGMENT_FX_SET_COL
+SEGMENT_FX_RELOAD_B:
     lda OBJ_TBLB3,x
-LA7FC:
+SEGMENT_FX_CHECK_B:
     iny
     sec
     sbc SEGMENT_FX_FEATURE_TBL,y
     clc
     adc #$04
-    bmi LA838
+    bmi SEGMENT_FX_HELPER_RTS
     cmp #$08
-    bcs LA838
-LA80A:
+    bcs SEGMENT_FX_HELPER_RTS
+SEGMENT_FX_SET_COL:
     iny
     iny
     lda SEGMENT_FX_FEATURE_TBL,y
     sta BLIT_COL
     tya
     lsr
-    bcc LA81B
+    bcc SEGMENT_FX_PTR_A
     lda #$AB
     ldy #$A7
-    bne LA81F
-LA81B:
+    bne SEGMENT_FX_SET_PTR
+SEGMENT_FX_PTR_A:
     lda #$A1
     ldy #$A7
-LA81F:
+SEGMENT_FX_SET_PTR:
     sta STREAM_PTR
     sty STREAM_PTR_HI
     lda #$02
@@ -7459,10 +7644,10 @@ LA81F:
     lda OBJ_TBLBB,x
     sta BLIT_ROW
     cmp #$14
-    bcs LA838
+    bcs SEGMENT_FX_HELPER_RTS
     lda #$05
     sta BLIT_ROWS
-LA838:
+SEGMENT_FX_HELPER_RTS:
     ldy OBJ_IDX2
     rts
     .byte $1C,$1E,$40,$20,$28,$26
@@ -7475,7 +7660,7 @@ TALLY_SCORE_EVENTS:
     lda STATE_4DCB
     beq TALLY_ONE_EVENT
     lda SCORE_EVENT,x
-    beq LA87E
+    beq TALLY_CLEAR_ENTRY
     lda #$01
     sta SCORE_EVENT,x
     lda #$00
@@ -7483,49 +7668,49 @@ TALLY_SCORE_EVENTS:
     ldy #$00
     jsr ADD_SCORE
     ldx #$07
-    jmp LA87E
+    jmp TALLY_CLEAR_ENTRY
 
 TALLY_ONE_EVENT:
     dec SCORE_EVENT,x
-    bmi LA887
+    bmi TALLY_NEXT_SLOT
     php
     tax
     tay
 
-LA869:
+TALLY_CHAR_LOOP:
     plp
     php
-    beq LA871
+    beq TALLY_CHAR_DRAW
     lda TALLY_CHAR_TBL,y
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
-LA871:
+TALLY_CHAR_DRAW:
     lda #$40
     jsr PANEL_PUT_CHAR_PAIR
     iny
     cpy #$06
-    bcc LA869
+    bcc TALLY_CHAR_LOOP
     plp
     ldx #$06
 
-LA87E:
+TALLY_CLEAR_ENTRY:
     lda #$00
 
-LA880:
+TALLY_CLEAR_LOOP:
     sta SCORE_EVENT,x
     dex
-    bpl LA880
+    bpl TALLY_CLEAR_LOOP
 
-LA886:
+TALLY_SCORE_EVENTS_RTS:
     rts
 
-LA887:
+TALLY_NEXT_SLOT:
     inc SCORE_EVENT,x
     dex
-    bmi LA886
+    bmi TALLY_SCORE_EVENTS_RTS
 
-LA88D:
+TALLY_DRAIN_LOOP:
     dec SCORE_EVENT,x
-    bmi LA887
+    bmi TALLY_NEXT_SLOT
     txa
     pha
     asl a
@@ -7533,7 +7718,7 @@ LA88D:
     jsr ADD_SCORE
     pla
     tax
-    bpl LA88D
+    bpl TALLY_DRAIN_LOOP
     brk
 ; -----------------------------------------------------------------------
 ; POINTS_TBL_LO/HI: interleaved BCD (lo,hi) point-value pairs, read by
@@ -7565,27 +7750,27 @@ ADD_SCORE:
     lda #$00
     adc SCORE_HI
     sta SCORE_HI
-    bcc LA8C7
+    bcc ADD_SCORE_CHECK_HISCORE
     inc SCORE_OVFL
 
-LA8C7:
+ADD_SCORE_CHECK_HISCORE:
     cmp HISCORE_HI
-    bcc LA8DD
-    bne LA8D7
+    bcc ADD_SCORE_CHECK_EXTRALIFE
+    bne ADD_SCORE_NEW_HISCORE
     cpy HISCORE_MID
-    bcc LA8DD
-    bne LA8D7
+    bcc ADD_SCORE_CHECK_EXTRALIFE
+    bne ADD_SCORE_NEW_HISCORE
     cpx HISCORE_LO
-    bcc LA8DD
+    bcc ADD_SCORE_CHECK_EXTRALIFE
 
-LA8D7:
+ADD_SCORE_NEW_HISCORE:
     sta HISCORE_HI
     sty HISCORE_MID
     stx HISCORE_LO
 
-LA8DD:
+ADD_SCORE_CHECK_EXTRALIFE:
     cmp NEXT_LIFE_SCORE
-    bcc LA8FB
+    bcc ADD_SCORE_REDRAW
     clc
     lda NEXT_LIFE_SCORE
 ; CONFIRMS DIFFICULTY_MODE: this BCD-add advances the extra-life threshold
@@ -7596,12 +7781,12 @@ LA8DD:
     sta NEXT_LIFE_SCORE
     ldx LIVES
     cpx #$06
-    bcs LA8FB
+    bcs ADD_SCORE_REDRAW
     inc LIVES
     ldy #$08
     jsr SOUND_REQ_V1
 
-LA8FB:
+ADD_SCORE_REDRAW:
     cld
     ldx #$E0            ; SCORE_LO's address - see the shared-entry note below
     .byte $2C            ; [skip-2] BIT-abs opcode; falls through skipping next 2 bytes
@@ -7974,16 +8159,14 @@ CLEAR_SID_LOOP:
 ; (0, "0B", 1, 2) - but only SOUND_REQ_V0 actually checks whether its voice
 ; is busy first (SND_SEQ nonzero -> already playing something, bail via
 ; RTS). SOUND_REQ_V0B/V1/V2 jump straight into the shared queue code
-; (QUEUE_SOUND_REQ) unconditionally.
-;
-; Worth calling out: the "lda SND_SEQ_V1 / bne ..." and "lda SND_SEQ_V2 /
-; bne ..." lines below are UNREACHABLE dead code - the branch just above
-; each one (BEQ with A just loaded as an immediate #$00, or BNE with A as a
-; nonzero immediate) is unconditional, so control always jumps past them
-; into QUEUE_SOUND_REQ. This looks like a leftover from an earlier version
-; of the code where every voice had its own busy-check (like SOUND_REQ_V0
-; still does) before being simplified - the dead bytes were left in place
-; rather than removed. Confirmed by direct reading, not a guess.
+; (QUEUE_SOUND_REQ) unconditionally, UNLESS entered instead at
+; SOUND_REQ_V1_SAFE/SOUND_REQ_V2_SAFE below - two more entry points that
+; DO check busy-ness first, just like SOUND_REQ_V0. These aren't dead code:
+; despite sitting right after an unconditional branch (making them
+; unreachable via fallthrough from SOUND_REQ_V0B/V1), both are called
+; directly via JSR from several places elsewhere in the file (the
+; per-object draw handlers' sound cues) - confirmed by searching every
+; reference to their addresses, not assumed from the fallthrough shape.
 SOUND_REQ_V0:
     lda SND_SEQ
     bne SOUND_REQ_DONE
@@ -7991,13 +8174,15 @@ SOUND_REQ_V0:
 SOUND_REQ_V0B:
     lda #$00
     beq QUEUE_SOUND_REQ  ; (unconditional - A is always 0 here)
-    lda SND_SEQ_V1        ; unreachable (see note above)
+SOUND_REQ_V1_SAFE:
+    lda SND_SEQ_V1
     bne SOUND_REQ_DONE
 
 SOUND_REQ_V1:
     lda #$01
     bne QUEUE_SOUND_REQ  ; (unconditional - A is always 1, nonzero)
-    lda SND_SEQ_V2        ; unreachable (see note above)
+SOUND_REQ_V2_SAFE:
+    lda SND_SEQ_V2
     bne SOUND_REQ_DONE
 
 SOUND_REQ_V2:

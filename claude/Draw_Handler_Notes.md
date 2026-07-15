@@ -122,11 +122,17 @@ convention.
   the code is readable, task #33 ("pin down remaining enemy OBJ_TYPE
   values" - Road Lord, Switch Blade, The Enforcer) has real disassembly to
   work from instead of raw bytes.
-* Most internal branch targets within each per-frame draw routine kept
-  positional `L####` labels rather than descriptive names, consistent with
-  the file's existing fallback convention for not-yet-semantically-confirmed
-  code - a good target for a future descriptive-naming pass once specific
-  TYPEs are identified.
+* **Update (follow-up session):** all ~180 positional `L####` labels across
+  both draw-dispatch blocks have since been given descriptive,
+  operation-based names (e.g. `DRAW_T07_PROX_CHECK`, `DRAW_MOVE_X_POS`) -
+  see the "code not identified and commented" follow-up work. Naming is
+  mechanical/structural (what each label's code *does*) rather than deep
+  game-design semantics, since the latter still needs TYPE identification
+  or live snapshots. That same pass also found and converted a genuine
+  ~131-byte block of previously-undissected code hiding in what was labelled
+  "`OBJ_DIST_TBL` aux data" (`$8988`-`$8A0A`, Stage 5) - the
+  `COMMIT_DIR_LEFT_PTR`/`RIGHT_PTR` edge-spawn helpers `COMMIT_TYPE` already
+  called via raw hex JSR.
 
 Rebuilt and verified: `spyhunter.bin` MD5 unchanged at
 `5af76758a98f7fc30dda87e48f94f5db` - the whole conversion is data->code only,
